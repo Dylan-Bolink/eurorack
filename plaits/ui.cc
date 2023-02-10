@@ -80,9 +80,9 @@ void Ui::Init(Patch* patch, Modulations* modulations, Settings* settings) {
   pots_[POTS_ADC_CHANNEL_TIMBRE_ATTENUVERTER].Init(
       &patch->timbre_modulation_amount, NULL, 0.005f, 2.0f, -1.0f);
   pots_[POTS_ADC_CHANNEL_FM_ATTENUVERTER].Init(
-      &patch->frequency_modulation_amount, NULL, 0.005f, 2.0f, -1.0f);
+      &patch->frequency_modulation_amount, &patch->aux_mode, 0.005f, 2.0f, -1.0f);
   pots_[POTS_ADC_CHANNEL_MORPH_ATTENUVERTER].Init(
-      &patch->morph_modulation_amount, NULL, 0.005f, 2.0f, -1.0f);
+      &patch->morph_modulation_amount, &patch->crossfade, 0.005f, 2.0f, -1.0f);
   
   // Keep track of the agreement between the random sequence sent to the 
   // switch and the value read by the ADC.
@@ -113,6 +113,8 @@ void Ui::LoadState() {
   octave_ = static_cast<float>(state.octave) / 256.0f;
   fine_tune_ = static_cast<float>(state.fine_tune) / 256.0f;
   enable_alt_navigation_ = state.engine < 8 || state.enable_alt_navigation;
+  patch_->aux_mode = static_cast<float>(state.aux_mode) / 256.0f;
+  patch_->crossfade = static_cast<float>(state.crossfade) / 256.0f;
 }
 
 void Ui::SaveState() {
@@ -123,6 +125,8 @@ void Ui::SaveState() {
   state->octave = static_cast<uint8_t>(octave_ * 256.0f);
   state->fine_tune = static_cast<uint8_t>(fine_tune_ * 256.0f);
   state->enable_alt_navigation = enable_alt_navigation_;
+  state->aux_mode = static_cast<uint8_t>(patch_->aux_mode * 256.0f);
+  state->crossfade = static_cast<uint8_t>(patch_->crossfade * 256.0f);
   settings_->SaveState();
 }
 
@@ -174,12 +178,27 @@ void Ui::UpdateLEDs() {
               ? patch_->lpg_colour
               : patch_->decay;
           value -= 0.001f;
-          for (int i = 0; i < 4; ++i) {
+          for (int i = 0; i < 3; ++i) {
             leds_.set(
-                parameter * 4 + 3 - i,
-                value * 64.0f > pwm_counter ? LED_COLOR_YELLOW : LED_COLOR_OFF);
-            value -= 0.25f;
+                parameter * 3 + 2 - i,
+                value * 85.0f > pwm_counter ? LED_COLOR_YELLOW : LED_COLOR_OFF);
+            value -= 0.18f;
           }
+
+          float led_color = LED_COLOR_GREEN;
+          if (patch_->aux_mode > 0.5f) {
+            led_color = LED_COLOR_RED;
+          }
+
+          if (patch_->aux_mode < 0.05f || patch_->aux_mode > 0.95f) {
+            leds_.set(6, led_color);
+          } else if (patch_->aux_mode < 0.15f || patch_->aux_mode > 0.85f) {
+            leds_.set(6, 12.0f > pwm_counter ? led_color: LED_COLOR_OFF);
+          } else if (patch_->aux_mode < 0.45f || patch_->aux_mode > 0.55f) {
+            leds_.set(6, 2.0f > pwm_counter ? led_color: LED_COLOR_OFF);
+          }
+
+          leds_.set(7, patch_->crossfade * 16.0f > pwm_counter ? LED_COLOR_RED: LED_COLOR_GREEN);
         }
       }
       break;
@@ -305,6 +324,8 @@ void Ui::ReadSwitches() {
         }
         
         if (switches_.just_pressed(Switch(0))) {
+          pots_[POTS_ADC_CHANNEL_FM_ATTENUVERTER].Lock();
+          pots_[POTS_ADC_CHANNEL_MORPH_ATTENUVERTER].Lock();
           pots_[POTS_ADC_CHANNEL_TIMBRE_POT].Lock();
           pots_[POTS_ADC_CHANNEL_MORPH_POT].Lock();
         }
@@ -314,7 +335,9 @@ void Ui::ReadSwitches() {
         }
         
         if (pots_[POTS_ADC_CHANNEL_MORPH_POT].editing_hidden_parameter() ||
-            pots_[POTS_ADC_CHANNEL_TIMBRE_POT].editing_hidden_parameter()) {
+            pots_[POTS_ADC_CHANNEL_TIMBRE_POT].editing_hidden_parameter() ||
+            pots_[POTS_ADC_CHANNEL_FM_ATTENUVERTER].editing_hidden_parameter()||
+            pots_[POTS_ADC_CHANNEL_MORPH_ATTENUVERTER].editing_hidden_parameter()) {
           mode_ = UI_MODE_DISPLAY_ALTERNATE_PARAMETERS;
         }
         
@@ -363,6 +386,8 @@ void Ui::ReadSwitches() {
           pots_[POTS_ADC_CHANNEL_MORPH_POT].Unlock();
           pots_[POTS_ADC_CHANNEL_HARMONICS_POT].Unlock();
           pots_[POTS_ADC_CHANNEL_FREQUENCY_POT].Unlock();
+          pots_[POTS_ADC_CHANNEL_FM_ATTENUVERTER].Unlock();
+          pots_[POTS_ADC_CHANNEL_MORPH_ATTENUVERTER].Unlock();
           press_time_[i] = 0;
           mode_ = UI_MODE_NORMAL;
         }

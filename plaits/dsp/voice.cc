@@ -47,7 +47,7 @@ void Voice::Init(BufferAllocator* allocator) {
   engines_.RegisterInstance(&chiptune_engine_, false, 0.5f, 0.5f);
   
   engines_.RegisterInstance(&virtual_analog_engine_, false, 0.8f, 0.8f);
-  engines_.RegisterInstance(&waveshaping_engine_, false, 0.7f, 0.6f);
+  engines_.RegisterInstance(&waveshaping_engine_, true, 0.7f, 0.6f);
   engines_.RegisterInstance(&fm_engine_, false, 0.6f, 0.6f);
   engines_.RegisterInstance(&grain_engine_, false, 0.7f, 0.6f);
   engines_.RegisterInstance(&additive_engine_, false, 0.8f, 0.8f);
@@ -74,6 +74,9 @@ void Voice::Init(BufferAllocator* allocator) {
   previous_engine_index_ = -1;
   reload_user_data_ = false;
   engine_cv_ = 0.0f;
+
+  sine_oscillator_.Init();
+  square_oscillator_.Init();
   
   out_post_processor_.Init();
   aux_post_processor_.Init();
@@ -135,6 +138,8 @@ void Voice::Render(
     e->Reset();
 
     out_post_processor_.Reset();
+    sine_oscillator_.Init();
+    square_oscillator_.Init();
     previous_engine_index_ = engine_index;
     reload_user_data_ = false;
   }
@@ -229,13 +234,17 @@ void Voice::Render(
   
   bool lpg_bypass = already_enveloped || \
       (!modulations.level_patched && !modulations.trigger_patched);
+  bool aux_lpg_bypass = lpg_bypass;
+
+  for (size_t i = 0; i < size; ++i) {
+    out_buffer_[i] = Crossfade(out_buffer_[i], aux_buffer_[i], patch.crossfade);
+  }
+
+  const float hf = patch.lpg_colour;
+  const float decay_tail = (20.0f * kBlockSize) / kSampleRate * SemitonesToRatio(-72.0f * patch.decay + 12.0f * hf) - short_decay;
   
   // Compute LPG parameters.
   if (!lpg_bypass) {
-    const float hf = patch.lpg_colour;
-    const float decay_tail = (20.0f * kBlockSize) / kSampleRate *
-        SemitonesToRatio(-72.0f * patch.decay + 12.0f * hf) - short_decay;
-    
     if (modulations.level_patched) {
       lpg_envelope_.ProcessLP(compressed_level, short_decay, decay_tail, hf);
     } else {
@@ -244,6 +253,37 @@ void Voice::Render(
     }
   } else {
     lpg_envelope_.Init();
+  }
+
+
+  if(engine_index == 1) {
+    lpg_bypass = false;
+    aux_lpg_bypass = false;
+
+    if(p.timbre < 0.5f) {
+      const float filterT = p.timbre * 2.0f;
+      lpg_envelope_.ProcessLP(max(
+        1.3f * filterT / (0.3f + fabsf(filterT)),
+        0.0f), (200.0f * kBlockSize) / kSampleRate *
+        SemitonesToRatio(-96.0f * 0.0f), (20.0f * kBlockSize) / kSampleRate * SemitonesToRatio(-72.0f * 0.0f), 0.0f);  
+    } 
+  }
+  
+  if (patch.aux_mode > 0.6f || patch.aux_mode < 0.4f) {
+    float frequency = NoteToFrequency(p.note);
+    aux_lpg_bypass = true;
+
+    if (patch.aux_mode > 0.95f || patch.aux_mode < 0.05f) {
+      frequency /= 4.0f;
+    } else if (patch.aux_mode > 0.75f || patch.aux_mode < 0.25f) {
+      frequency /= 2.0f;
+    }
+
+    if (patch.aux_mode > 0.55f) {
+      square_oscillator_.Render(frequency, aux_buffer_, size);
+    } else if (patch.aux_mode < 0.45f) {
+      sine_oscillator_.Render(frequency, aux_buffer_, size);
+    }
   }
   
   out_post_processor_.Process(
@@ -259,7 +299,7 @@ void Voice::Render(
 
   aux_post_processor_.Process(
       pp_s.aux_gain,
-      lpg_bypass,
+      aux_lpg_bypass,
       lpg_envelope_.gain(),
       lpg_envelope_.frequency(),
       lpg_envelope_.hf_bleed(),

@@ -49,9 +49,7 @@ void WaveshapingEngine::Init(BufferAllocator* allocator) {
   previous_overtone_gain_ = 0.0f;
 }
 
-void WaveshapingEngine::Reset() {
-  
-}
+void WaveshapingEngine::Reset() {}
 
 float Tame(float f0, float harmonics, float order) {
   f0 *= harmonics;
@@ -78,25 +76,42 @@ void WaveshapingEngine::Render(
 
   // Try to estimate how rich the spectrum is, and reduce the range of the
   // waveshaping control accordingly.
-  const float slope = 3.0f + fabsf(parameters.morph - 0.5f) * 5.0f;
-  const float shape_amount = fabsf(parameters.harmonics - 0.5f) * 2.0f;
+  const float slope = 3.0f + fabsf(pw - 0.5f) * 5.0f;
+  const float shape_amount = fabsf(parameters.harmonics  - 0.5f) * 2.0f;
   const float shape_amount_attenuation = Tame(f0, slope, 16.0f);
-  const float wavefolder_gain = parameters.timbre;
+
+  const float shape = 0.5f + (shape - 0.5f) * shape_amount_attenuation;
+
+  float wavefolder_gain = 0.0f;
   const float wavefolder_gain_attenuation = Tame(
       f0,
       slope * (3.0f + shape_amount * shape_amount_attenuation * 5.0f),
       12.0f);
   
+  if(parameters.timbre > 0.5f) {
+    wavefolder_gain = (parameters.timbre - 0.5f) * 2.0f;
+    //new
+    wavefolder_gain = 0.5f + (parameters.timbre - 0.5f) * Tame(
+    frequency,
+    slope * (3.0f + shape_amount * shape_amount_attenuation * 5.0f),
+    12.0f);
+  } else {
+    wavefolder_gain = 0;
+  }
+
   // Apply waveshaper / wavefolder.
   ParameterInterpolator shape_modulation(
       &previous_shape_,
-      0.5f + (parameters.harmonics - 0.5f) * shape_amount_attenuation,
+      shape * 3.9999f,
       size);
+  // new : line from tides2
+  // &shape_, is_phasor ? shape * 5.9999f + 5.0f : shape * 3.9999f, size);
+
   ParameterInterpolator wf_gain_modulation(
       &previous_wavefolder_gain_,
       0.03f + 0.46f * wavefolder_gain * wavefolder_gain_attenuation,
       size);
-  const float overtone_gain = parameters.timbre * (2.0f - parameters.timbre);
+  const float overtone_gain = wavefolder_gain * (2.0f - wavefolder_gain);
   ParameterInterpolator overtone_gain_modulation(
       &previous_overtone_gain_,
       overtone_gain * (2.0f - overtone_gain),
@@ -129,6 +144,7 @@ void WaveshapingEngine::Render(
         lut_fold_2 + 1, index, 512.0f);
     
     float sine = Sine(aux[i] * 0.25f + 0.5f);
+
     out[i] = fold;
     aux[i] = sine + (fold_2 - sine) * overtone_gain_modulation.Next();
   }

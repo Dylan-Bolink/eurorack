@@ -56,6 +56,8 @@ struct State {
   uint8_t lpg_colour;
   uint8_t decay;
   uint8_t octave;
+  uint8_t aux_mode;
+  uint8_t crossfade;
   uint8_t color_blind;
   uint8_t fine_tune;
   uint8_t enable_alt_navigation;

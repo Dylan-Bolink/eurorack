@@ -54,7 +54,7 @@ class WaveshapingEngine : public Engine {
   float previous_shape_;
   float previous_wavefolder_gain_;
   float previous_overtone_gain_;
-  
+
   DISALLOW_COPY_AND_ASSIGN(WaveshapingEngine);
 };
 

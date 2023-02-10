@@ -114,6 +114,11 @@ class Ui {
          i <= POTS_ADC_CHANNEL_MORPH_POT; ++i) {
       pots_[i].Realign();
     }
+    // pots_[POTS_ADC_CHANNEL_TIMBRE_POT].Realign();
+    // pots_[POTS_ADC_CHANNEL_MORPH_POT].Realign();
+    // pots_[POTS_ADC_CHANNEL_HARMONICS_POT].Realign();
+    // pots_[POTS_ADC_CHANNEL_FM_ATTENUVERTER].Realign();
+    // pots_[POTS_ADC_CHANNEL_MORPH_ATTENUVERTER].Realign();
   }
   
   UiMode mode_;
@@ -129,6 +134,8 @@ class Ui {
   float fine_tune_;
   float transposition_;
   float octave_;
+  float aux_mode;
+  float crossfade;
   Patch* patch_;
   Modulations* modulations_;
   NormalizationProbe normalization_probe_;

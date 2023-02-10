@@ -83,29 +83,29 @@ lookup_tables.append(
 Waveshaper tables stolen from Tides
 ----------------------------------------------------------------------------"""
 
-WAVESHAPER_SIZE = 128
+WAVESHAPER_SIZE = 256
 
 x = numpy.arange(0, WAVESHAPER_SIZE + 1) / float(WAVESHAPER_SIZE)
 
 linear = x
+sin = 0.5 - 0.5 * numpy.cos(x * numpy.pi)
 tan = numpy.arctan(8 * numpy.cos(numpy.pi * x))
-scale = tan.max()
+tan_scale = tan.max()
 fade_crop = numpy.minimum(1.0, 4.0 - 4.0 * x)
 bump = (1.0 - numpy.cos(numpy.pi * x * 1.5)) * (1.0 - numpy.cos(numpy.pi * fade_crop)) / 4.5
-double_bump = numpy.sin(numpy.pi * x * 1.5)
 inverse_sin = numpy.arccos(1 - 2 * x) / numpy.pi
-inverse_tan = numpy.arccos(numpy.tan(scale * (1.0 - 2.0 * x)) / 8.0) / numpy.pi
+inverse_tan = numpy.arccos(numpy.tan(tan_scale * (1.0 - 2.0 * x)) / 8.0) / numpy.pi
+inverse_tan[0] = 0
 
 def flip(x):
-  x = numpy.array(list(-x[WAVESHAPER_SIZE:0:-1]) + list(x))
-  return numpy.round((x * 32767.0)).astype(int)
+  x = 2.0 * (x - x.min()) / (x.max() - x.min()) - 1.0
+  return list(numpy.round((x * 32767.0)).astype(int))
 
 lookup_tables_i16.append(('ws_inverse_tan', flip(inverse_tan)))
 lookup_tables_i16.append(('ws_inverse_sin', flip(inverse_sin)))
 lookup_tables_i16.append(('ws_linear', flip(linear)))
+lookup_tables_i16.append(('ws_sin', flip(sin)))
 lookup_tables_i16.append(('ws_bump', flip(bump)))
-lookup_tables_i16.append(('ws_double_bump', flip(double_bump)))
-lookup_tables_i16.append(('ws_double_bump_sentinel', flip(double_bump)))
 
 WAVESHAPER_SIZE = 512
 

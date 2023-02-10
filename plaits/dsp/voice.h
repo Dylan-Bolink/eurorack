@@ -60,6 +60,8 @@
 #include "plaits/dsp/engine2/virtual_analog_vcf_engine.h"
 #include "plaits/dsp/engine2/wave_terrain_engine.h"
 
+#include "plaits/dsp/oscillator/square_oscillator.h"
+
 #include "plaits/dsp/envelope.h"
 
 #include "plaits/dsp/fx/low_pass_gate.h"
@@ -134,6 +136,8 @@ struct Patch {
   int engine;
   float decay;
   float lpg_colour;
+  float aux_mode;
+  float crossfade;
 };
 
 struct Modulations {
@@ -228,6 +232,10 @@ class Voice {
   ChiptuneEngine chiptune_engine_;
 
   stmlib::HysteresisQuantizer2 engine_quantizer_;
+  FastSineOscillator sine_oscillator_;
+  SquareOscillator square_oscillator_
+
+  stmlib::HysteresisQuantizer engine_quantizer_;
   
   bool reload_user_data_;
   int previous_engine_index_;
