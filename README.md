@@ -3,20 +3,36 @@ Alternate firmwares for various modules:
 
 Plaits tidified:
 =======
+### It's more like tides :0
 The waveshape oscillator algoritme is more in line with the real Tides module.
+
 The harmonics shape are 1:1.
+
 The filter is in the first half of the timbre knob then switches to a waveshaper.
 
+
+### More options!
+
 Holding the left button and turning the attenuverters have various functions:
-Timbre:
+
+**Timbre:**
+
 Model cv input selection
+
 First half normal behavior
+
 Second half acts as a sync input for osc models
-FM: 
+
+**FM:**
+
 The first half activates a sine sub oscillator on aux (unaffected by the lpg/level)
+
 Setting it to noon will set it to the default aux
+
 The second half activates a square sub oscillator on aux (unaffected by the lpg/level)
-Morph:
+
+**Morph:**
+
 Crossfades the output from normal output towards the aux variant. (not the sub oscillators)
 
 Tides freqlock:
