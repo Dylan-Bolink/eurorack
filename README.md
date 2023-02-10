@@ -1,31 +1,27 @@
 Mutable Instruments' Eurorack Modules.
+Alternate firmwares for various modules:
 
-* [Blades](http://mutable-instruments.net/modules/blades): Dual multimode filter.
-* [Blinds](http://mutable-instruments.net/modules/blinds): Quad VC-polarizer.
-* [Braids](http://mutable-instruments.net/modules/braids): Macro-oscillator.
-* [Branches](http://mutable-instruments.net/modules/branches): Dual Bernoulli gate.
-* [Clouds](http://mutable-instruments.net/modules/clouds): Texture synthesizer.
-* [Ears](http://mutable-instruments.net/modules/ears): Contact microphone.
-* [Edges](http://mutable-instruments.net/modules/edges): Quad chiptune digital oscillator.
-* [Elements](http://mutable-instruments.net/modules/elements): Modal synthesizer.
-* [Frames](http://mutable-instruments.net/modules/frames): Keyframer/mixer.
-* [Grids](http://mutable-instruments.net/modules/grids): Topographic drum sequencer.
-* [Kinks](http://mutable-instruments.net/modules/kinks): Utility module - rectifier, analog logic, S&H, noise.
-* [Links](http://mutable-instruments.net/modules/links): Utility module - buffer, mixer.
-* [Marbles](http://mutable-instruments.net/modules/marbles): Random sampler.
-* [Peaks](http://mutable-instruments.net/modules/peaks): Dual trigger converter.
-* [Plaits](http://mutable-instruments.net/modules/plaits): Macro oscillator.
-* [Rings](http://mutable-instruments.net/modules/rings): Resonator.
-* [Ripples](http://mutable-instruments.net/modules/ripples): Liquid 2-pole BP, 2-pole LP and 4-pole LP filter.
-* [Shades](http://mutable-instruments.net/modules/shades): Triple attenuverter.
-* [Shelves](http://mutable-instruments.net/modules/shelves): EQ filter.
-* [Stages](http://mutable-instruments.net/modules/stages): Segment generator.
-* [Streams](http://mutable-instruments.net/modules/streams): Dual dynamics gate.
-* [Tides](http://mutable-instruments.net/modules/tides): Tidal modulator.
-* [Veils](http://mutable-instruments.net/modules/veils): Quad VCA.
-* [Volts](http://mutable-instruments.net/modules/volts): +5V power module.
-* [Warps](http://mutable-instruments.net/modules/warps): Meta-modulator.
-* [Yarns](http://mutable-instruments.net/modules/yarns): MIDI interface.
+Plaits tidified:
+=======
+The waveshape oscillator algoritme is more in line with the real Tides module.
+The harmonics shape are 1:1.
+The filter is in the first half of the timbre knob then switches to a waveshaper.
+
+Holding the left button and turning the attenuverters have various functions:
+Timbre:
+Model cv input selection
+First half normal behavior
+Second half acts as a sync input for osc models
+FM: 
+The first half activates a sine sub oscillator on aux (unaffected by the lpg/level)
+Setting it to noon will set it to the default aux
+The second half activates a square sub oscillator on aux (unaffected by the lpg/level)
+Morph:
+Crossfades the output from normal output towards the aux variant. (not the sub oscillators)
+
+Tides freqlock:
+=======
+Hold the frequency button to lock the frequency and activates a transpose function on the frequency knob.
 
 License
 =======
