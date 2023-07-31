@@ -80,8 +80,6 @@ void WaveshapingEngine::Render(
   const float shape_amount = fabsf(parameters.harmonics  - 0.5f) * 2.0f;
   const float shape_amount_attenuation = Tame(f0, slope, 16.0f);
 
-  const float shape = 0.5f + (shape - 0.5f) * shape_amount_attenuation;
-
   float wavefolder_gain = 0.0f;
   const float wavefolder_gain_attenuation = Tame(
       f0,
@@ -90,22 +88,15 @@ void WaveshapingEngine::Render(
   
   if(parameters.timbre > 0.5f) {
     wavefolder_gain = (parameters.timbre - 0.5f) * 2.0f;
-    //new
-    wavefolder_gain = 0.5f + (parameters.timbre - 0.5f) * Tame(
-    frequency,
-    slope * (3.0f + shape_amount * shape_amount_attenuation * 5.0f),
-    12.0f);
   } else {
     wavefolder_gain = 0;
   }
 
   // Apply waveshaper / wavefolder.
-  ParameterInterpolator shape_modulation(
+ ParameterInterpolator shape_modulation(
       &previous_shape_,
-      shape * 3.9999f,
+      0.5f + (parameters.harmonics - 0.5f) * shape_amount_attenuation,
       size);
-  // new : line from tides2
-  // &shape_, is_phasor ? shape * 5.9999f + 5.0f : shape * 3.9999f, size);
 
   ParameterInterpolator wf_gain_modulation(
       &previous_wavefolder_gain_,

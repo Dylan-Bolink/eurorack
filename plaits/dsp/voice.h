@@ -235,6 +235,7 @@ class Voice {
   FastSineOscillator sine_oscillator_;
   SquareOscillator square_oscillator_
 
+
   stmlib::HysteresisQuantizer engine_quantizer_;
   
   bool reload_user_data_;
@@ -243,6 +244,7 @@ class Voice {
   
   float previous_note_;
   bool trigger_state_;
+  bool sync_state_;
   
   DecayEnvelope decay_envelope_;
   LPGEnvelope lpg_envelope_;

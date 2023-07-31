@@ -85,6 +85,7 @@ void Voice::Init(BufferAllocator* allocator) {
   lpg_envelope_.Init();
   
   trigger_state_ = false;
+  sync_state_ = false;
   previous_note_ = 0.0f;
   
   trigger_delay_.Init(trigger_delay_line_);
@@ -110,16 +111,18 @@ void Voice::Render(
         lpg_envelope_.Trigger();
       }
       decay_envelope_.Trigger();
-      engine_cv_ = modulations.engine;
+      // engine_cv_ = modulations.engine;
     }
   } else {
     if (trigger_value < 0.1f) {
       trigger_state_ = false;
     }
   }
-  if (!modulations.trigger_patched) {
-    engine_cv_ = modulations.engine;
-  }
+  
+  //revert model
+  // if (!modulations.trigger_patched) {
+  //   engine_cv_ = modulations.engine;
+  // }
 
   // Engine selection.
   int engine_index = engine_quantizer_.Process(
@@ -144,6 +147,8 @@ void Voice::Render(
     reload_user_data_ = false;
   }
   EngineParameters p;
+
+
 
   bool rising_edge = trigger_state_ && !previous_trigger_state;
   float note = (modulations.note + previous_note_) * 0.5f;
@@ -242,7 +247,7 @@ void Voice::Render(
 
   const float hf = patch.lpg_colour;
   const float decay_tail = (20.0f * kBlockSize) / kSampleRate * SemitonesToRatio(-72.0f * patch.decay + 12.0f * hf) - short_decay;
-  
+
   // Compute LPG parameters.
   if (!lpg_bypass) {
     if (modulations.level_patched) {
@@ -254,7 +259,6 @@ void Voice::Render(
   } else {
     lpg_envelope_.Init();
   }
-
 
   if(engine_index == 1) {
     lpg_bypass = false;
@@ -285,7 +289,23 @@ void Voice::Render(
       sine_oscillator_.Render(frequency, aux_buffer_, size);
     }
   }
-  
+
+
+
+  bool previous_sync_state = sync_state_;
+  if (!previous_sync_state) {
+    if (modulations.engine > 0.06f) {
+      sync_state_ = true;
+      // phase_ = 0.0;
+    }
+  } else {
+    if (modulations.engine < 0.05f) {
+      sync_state_ = false;
+      
+    }
+  }
+
+
   out_post_processor_.Process(
       pp_s.out_gain,
       lpg_bypass,

@@ -90,6 +90,20 @@ void FMEngine::Render(
   
   Downsampler carrier_downsampler(&carrier_fir_);
   Downsampler sub_downsampler(&sub_fir_);
+
+
+  bool previous_sync_state = sync_state_;
+  if (!previous_sync_state) {
+    if (parameters.engine > 0.3f) {
+      sync_state_ = true;
+      carrier_phase_ = 0;
+    }
+  } else {
+    if (modulations.engine < 0.1f) {
+      sync_state_ = false;
+      
+    }
+  }
   
   while (size--) {
     const float max_uint32 = 4294967296.0f;

@@ -74,6 +74,8 @@ bool Settings::Init() {
   state_.lpg_colour = 0;
   state_.decay = 128;
   state_.octave = 255;
+  state_.aux_mode = 0;
+  state_.crossfade = 0;
   state_.color_blind = 0;
   state_.enable_alt_navigation = 0;
   state_.fine_tune = 128;

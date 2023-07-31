@@ -67,8 +67,8 @@ extern const float lut_4x_downsampler_fir[];
 extern const int16_t lut_ws_inverse_tan[];
 extern const int16_t lut_ws_inverse_sin[];
 extern const int16_t lut_ws_linear[];
+extern const int16_t lut_ws_sin[];
 extern const int16_t lut_ws_bump[];
-extern const int16_t lut_ws_double_bump[];
 extern const int8_t lut_lpc_excitation_pulse[];
 extern const int16_t wav_integrated_waves[];
 #define SYX_BANK_0 0
@@ -97,12 +97,10 @@ extern const int16_t wav_integrated_waves[];
 #define LUT_WS_INVERSE_SIN_SIZE 257
 #define LUT_WS_LINEAR 2
 #define LUT_WS_LINEAR_SIZE 257
-#define LUT_WS_BUMP 3
+#define LUT_WS_SIN 3
+#define LUT_WS_SIN_SIZE 257
+#define LUT_WS_BUMP 4
 #define LUT_WS_BUMP_SIZE 257
-#define LUT_WS_DOUBLE_BUMP 4
-#define LUT_WS_DOUBLE_BUMP_SIZE 257
-#define LUT_WS_DOUBLE_BUMP_SENTINEL 5
-#define LUT_WS_DOUBLE_BUMP_SENTINEL_SIZE 257
 #define LUT_LPC_EXCITATION_PULSE 0
 #define LUT_LPC_EXCITATION_PULSE_SIZE 640
 #define WAV_INTEGRATED_WAVES 0
