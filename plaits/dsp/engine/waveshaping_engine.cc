@@ -44,6 +44,10 @@ using namespace stmlib;
 void WaveshapingEngine::Init(BufferAllocator* allocator) {
   slope_.Init();
   triangle_.Init();
+
+  svf_[0].Init();
+  svf_[1].Init();
+
   previous_shape_ = 0.0f;
   previous_wavefolder_gain_ = 0.0f;
   previous_overtone_gain_ = 0.0f;
@@ -109,6 +113,7 @@ void WaveshapingEngine::Render(
       size);
   
   for (size_t i = 0; i < size; ++i) {
+
     float shape = shape_modulation.Next() * 3.9999f;
     MAKE_INTEGRAL_FRACTIONAL(shape);
     
@@ -136,8 +141,25 @@ void WaveshapingEngine::Render(
     
     float sine = Sine(aux[i] * 0.25f + 0.5f);
 
+    sine = sine + (fold_2 - sine) * overtone_gain_modulation.Next();
+
+      float filtering = parameters.timbre * 2.0f;
+      if(filtering > 1.0f) {
+        filtering = 1.0f;
+      }
+
+
+      svf_[0].set_f_q<FREQUENCY_FAST>(f0 * SemitonesToRatio(
+      (filtering - 0.5f) * 120.0f), 0.5f);
+      fold = svf_[0].Process<FILTER_MODE_LOW_PASS>(fold);
+
+      svf_[1].set_f_q<FREQUENCY_FAST>(f0 * SemitonesToRatio(
+      (filtering - 0.5f) * 120.0f), 0.5f);
+      sine = svf_[1].Process<FILTER_MODE_LOW_PASS>(sine);
+
+
     out[i] = fold;
-    aux[i] = sine + (fold_2 - sine) * overtone_gain_modulation.Next();
+    aux[i] = sine;
   }
 }
 

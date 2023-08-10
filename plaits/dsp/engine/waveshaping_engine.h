@@ -29,6 +29,8 @@
 #ifndef PLAITS_DSP_ENGINE_WAVESHAPING_ENGINE_H_
 #define PLAITS_DSP_ENGINE_WAVESHAPING_ENGINE_H_
 
+#include "stmlib/dsp/filter.h"
+
 #include "plaits/dsp/engine/engine.h"
 #include "plaits/dsp/oscillator/oscillator.h"
 
@@ -49,8 +51,10 @@ class WaveshapingEngine : public Engine {
       bool* already_enveloped);
   
  private:
+  stmlib::Svf svf_[2];
   Oscillator slope_;
   Oscillator triangle_;
+
   float previous_shape_;
   float previous_wavefolder_gain_;
   float previous_overtone_gain_;

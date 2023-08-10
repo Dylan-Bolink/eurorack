@@ -259,33 +259,11 @@ void Voice::Render(
     lpg_envelope_.Init();
   }
 
-  // if(engine_index == 1) {
-  //   lpg_bypass = false;
-  //   aux_lpg_bypass = false;
-
-  //   if(p.timbre < 0.5f) {
-  //     const float filterT = p.timbre * 2.0f;
-  //     lpg_envelope_.ProcessLP(max(
-  //       1.3f * filterT / (0.3f + fabsf(filterT)),
-  //       0.0f), (200.0f * kBlockSize) / kSampleRate *
-  //       SemitonesToRatio(-96.0f * 0.0f), (20.0f * kBlockSize) / kSampleRate * SemitonesToRatio(-72.0f * 0.0f), 0.0f);  
-  //   } 
-  // }
   
   if (patch.aux_mode > 0.6f || patch.aux_mode < 0.4f) {
     float frequency = NoteToFrequency(p.note);
     if (patch.aux_mode > 0.8f || patch.aux_mode < 0.2f) {
-      frequency = NoteToFrequency(ApplyModulations(
-      patch.note + note,
-      0,
-      0,
-      0,
-      use_internal_envelope,
-      internal_envelope_amplitude * \
-          decay_envelope_.value() * decay_envelope_.value() * 48.0f,
-      1.0f,
-      -119.0f,
-      120.0f));
+      frequency = NoteToFrequency(patch.note + note);
     }
     
     aux_lpg_bypass = true;
