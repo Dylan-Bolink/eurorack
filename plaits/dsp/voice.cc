@@ -85,7 +85,6 @@ void Voice::Init(BufferAllocator* allocator) {
   lpg_envelope_.Init();
   
   trigger_state_ = false;
-  sync_state_ = false;
   previous_note_ = 0.0f;
   
   trigger_delay_.Init(trigger_delay_line_);
@@ -120,9 +119,9 @@ void Voice::Render(
   }
   
   //revert model
-  // if (!modulations.trigger_patched) {
-  //   engine_cv_ = modulations.engine;
-  // }
+  if (!modulations.trigger_patched) {
+    engine_cv_ = modulations.engine;
+  }
 
   // Engine selection.
   int engine_index = engine_quantizer_.Process(
@@ -260,51 +259,60 @@ void Voice::Render(
     lpg_envelope_.Init();
   }
 
-  if(engine_index == 1) {
-    lpg_bypass = false;
-    aux_lpg_bypass = false;
+  // if(engine_index == 1) {
+  //   lpg_bypass = false;
+  //   aux_lpg_bypass = false;
 
-    if(p.timbre < 0.5f) {
-      const float filterT = p.timbre * 2.0f;
-      lpg_envelope_.ProcessLP(max(
-        1.3f * filterT / (0.3f + fabsf(filterT)),
-        0.0f), (200.0f * kBlockSize) / kSampleRate *
-        SemitonesToRatio(-96.0f * 0.0f), (20.0f * kBlockSize) / kSampleRate * SemitonesToRatio(-72.0f * 0.0f), 0.0f);  
-    } 
-  }
+  //   if(p.timbre < 0.5f) {
+  //     const float filterT = p.timbre * 2.0f;
+  //     lpg_envelope_.ProcessLP(max(
+  //       1.3f * filterT / (0.3f + fabsf(filterT)),
+  //       0.0f), (200.0f * kBlockSize) / kSampleRate *
+  //       SemitonesToRatio(-96.0f * 0.0f), (20.0f * kBlockSize) / kSampleRate * SemitonesToRatio(-72.0f * 0.0f), 0.0f);  
+  //   } 
+  // }
   
   if (patch.aux_mode > 0.6f || patch.aux_mode < 0.4f) {
     float frequency = NoteToFrequency(p.note);
-    aux_lpg_bypass = true;
-
-    if (patch.aux_mode > 0.95f || patch.aux_mode < 0.05f) {
-      frequency /= 4.0f;
-    } else if (patch.aux_mode > 0.75f || patch.aux_mode < 0.25f) {
-      frequency /= 2.0f;
+    if (patch.aux_mode > 0.8f || patch.aux_mode < 0.2f) {
+      frequency = NoteToFrequency(ApplyModulations(
+      patch.note + note,
+      0,
+      0,
+      0,
+      use_internal_envelope,
+      internal_envelope_amplitude * \
+          decay_envelope_.value() * decay_envelope_.value() * 48.0f,
+      1.0f,
+      -119.0f,
+      120.0f));
     }
+    
+    aux_lpg_bypass = true;
+    if (patch.aux_oct > 0.9f) {
+      frequency *= 4.0f;
+    } else if (patch.aux_oct > 0.8f) {
+      frequency *= 3.0f;
+    } else if (patch.aux_oct > 0.7f) {
+      frequency *= 2.0f;
+    } else if (patch.aux_oct > 0.6f) {
+      frequency *= 1.5f;
+    } else if (patch.aux_oct < 0.1f) {
+      frequency /= 4.0f;
+    } else if (patch.aux_oct < 0.2f) {
+      frequency /= 3.0f;
+    } else if (patch.aux_oct < 0.3f) {
+      frequency /= 2.0f;
+    } else if (patch.aux_oct < 0.4f) {
+      frequency /= 1.5f;
+    } 
 
-    if (patch.aux_mode > 0.55f) {
+    if (patch.aux_mode > 0.6f) {
       square_oscillator_.Render(frequency, aux_buffer_, size);
-    } else if (patch.aux_mode < 0.45f) {
+    } else if (patch.aux_mode < 0.4f) {
       sine_oscillator_.Render(frequency, aux_buffer_, size);
     }
   }
-
-
-
-  bool previous_sync_state = sync_state_;
-  if (!previous_sync_state) {
-    if (modulations.engine > 0.06f) {
-      sync_state_ = true;
-      // phase_ = 0.0;
-    }
-  } else {
-    if (modulations.engine < 0.05f) {
-      sync_state_ = false;
-      
-    }
-  }
-
 
   out_post_processor_.Process(
       pp_s.out_gain,

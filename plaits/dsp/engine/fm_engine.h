@@ -57,7 +57,6 @@ class FMEngine : public Engine {
   float previous_amount_;
   float previous_feedback_;
   float previous_sample_;
-  bool sync_state_;
   
   
   float sub_fir_;

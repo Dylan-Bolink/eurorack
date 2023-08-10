@@ -136,6 +136,7 @@ struct Patch {
   int engine;
   float decay;
   float lpg_colour;
+  float aux_oct;
   float aux_mode;
   float crossfade;
 };
@@ -233,10 +234,10 @@ class Voice {
 
   stmlib::HysteresisQuantizer2 engine_quantizer_;
   FastSineOscillator sine_oscillator_;
-  SquareOscillator square_oscillator_
+  SquareOscillator square_oscillator_;
 
 
-  stmlib::HysteresisQuantizer engine_quantizer_;
+  // stmlib::HysteresisQuantizer engine_quantizer_;
   
   bool reload_user_data_;
   int previous_engine_index_;
@@ -244,7 +245,6 @@ class Voice {
   
   float previous_note_;
   bool trigger_state_;
-  bool sync_state_;
   
   DecayEnvelope decay_envelope_;
   LPGEnvelope lpg_envelope_;

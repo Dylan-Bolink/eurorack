@@ -57,16 +57,16 @@ void Ui::Init(Patch* patch, Modulations* modulations, Settings* settings) {
   
   LoadState();
   
-  if (switches_.pressed_immediate(SWITCH_ROW_2)) {
-    State* state = settings_->mutable_state();
-    if (state->color_blind == 1) {
-      state->color_blind = 0; 
-    } else {
-      state->color_blind = 1; 
-    }
-    settings_->SaveState();
-    ignore_release_[0] = ignore_release_[1] = true;
-  }
+  // if (switches_.pressed_immediate(SWITCH_ROW_2)) {
+  //   State* state = settings_->mutable_state();
+  //   if (state->color_blind == 1) {
+  //     state->color_blind = 0; 
+  //   } else {
+  //     state->color_blind = 1; 
+  //   }
+  //   settings_->SaveState();
+  //   ignore_release_[0] = ignore_release_[1] = true;
+  // }
   
   // Bind pots to parameters.
   pots_[POTS_ADC_CHANNEL_FREQUENCY_POT].Init(
@@ -78,9 +78,9 @@ void Ui::Init(Patch* patch, Modulations* modulations, Settings* settings) {
   pots_[POTS_ADC_CHANNEL_MORPH_POT].Init(
       &patch->morph, &patch->decay, 0.01f, 1.0f, 0.0f);
   pots_[POTS_ADC_CHANNEL_TIMBRE_ATTENUVERTER].Init(
-      &patch->timbre_modulation_amount, NULL, 0.005f, 2.0f, -1.0f);
+      &patch->timbre_modulation_amount, &patch->aux_mode, 0.005f, 2.0f, -1.0f);
   pots_[POTS_ADC_CHANNEL_FM_ATTENUVERTER].Init(
-      &patch->frequency_modulation_amount, &patch->aux_mode, 0.005f, 2.0f, -1.0f);
+      &patch->frequency_modulation_amount, &patch->aux_oct, 0.005f, 2.0f, -1.0f);
   pots_[POTS_ADC_CHANNEL_MORPH_ATTENUVERTER].Init(
       &patch->morph_modulation_amount, &patch->crossfade, 0.005f, 2.0f, -1.0f);
   
@@ -113,6 +113,7 @@ void Ui::LoadState() {
   octave_ = static_cast<float>(state.octave) / 256.0f;
   fine_tune_ = static_cast<float>(state.fine_tune) / 256.0f;
   enable_alt_navigation_ = state.engine < 8 || state.enable_alt_navigation;
+  patch_->aux_oct = static_cast<float>(state.aux_oct) / 256.0f;
   patch_->aux_mode = static_cast<float>(state.aux_mode) / 256.0f;
   patch_->crossfade = static_cast<float>(state.crossfade) / 256.0f;
 }
@@ -125,19 +126,16 @@ void Ui::SaveState() {
   state->octave = static_cast<uint8_t>(octave_ * 256.0f);
   state->fine_tune = static_cast<uint8_t>(fine_tune_ * 256.0f);
   state->enable_alt_navigation = enable_alt_navigation_;
+  state->aux_oct = static_cast<uint8_t>(patch_->aux_oct * 256.0f);
   state->aux_mode = static_cast<uint8_t>(patch_->aux_mode * 256.0f);
   state->crossfade = static_cast<uint8_t>(patch_->crossfade * 256.0f);
   settings_->SaveState();
 }
 
-uint32_t Ui::BankToColor(int bank, bool color_blind, int pwm_counter) {
+uint32_t Ui::BankToColor(int bank, int pwm_counter) {
   // pwm_counter is between 0 and 15
-  if (color_blind) {
-    return pwm_counter < (16 >> (2 * bank)) ? LED_COLOR_YELLOW : LED_COLOR_OFF;
-  } else {
     uint32_t colors[3] = { LED_COLOR_YELLOW, LED_COLOR_GREEN, LED_COLOR_RED };
     return colors[bank];
-  }
 }
 
 void Ui::UpdateLEDs() {
@@ -151,20 +149,18 @@ void Ui::UpdateLEDs() {
   switch (mode_) {
     case UI_MODE_NORMAL:
       {
-        const bool color_blind = settings_->state().color_blind == 1;
-
         // Selected with the buttons
         const int selected_row = patch_->engine % 8;
         const int selected_bank = patch_->engine / 8;
         uint32_t selected_color = pwm_counter < triangle
-            ? BankToColor(selected_bank, color_blind, pwm_counter)
+            ? BankToColor(selected_bank, pwm_counter)
             : LED_COLOR_OFF;
 
         // With the CV modulation applied
         const int active_row = active_engine_ % 8;
         const int active_bank = active_engine_ / 8;
         uint32_t active_color = BankToColor(
-            active_bank, color_blind, pwm_counter);
+            active_bank, pwm_counter);
 
         leds_.set(active_row, active_color);
         leds_.mask(selected_row, selected_color);
@@ -185,19 +181,28 @@ void Ui::UpdateLEDs() {
             value -= 0.18f;
           }
 
-          float led_color = LED_COLOR_GREEN;
-          if (patch_->aux_mode > 0.5f) {
-            led_color = LED_COLOR_RED;
-          }
+          if (patch_->aux_mode > 0.6f || patch_->aux_mode < 0.4f) {
+            float led_color = LED_COLOR_GREEN;
+            if (patch_->aux_mode > 0.5f) {
+              led_color = LED_COLOR_RED;
+            }
 
-          if (patch_->aux_mode < 0.05f || patch_->aux_mode > 0.95f) {
-            leds_.set(6, led_color);
-          } else if (patch_->aux_mode < 0.15f || patch_->aux_mode > 0.85f) {
-            leds_.set(6, 12.0f > pwm_counter ? led_color: LED_COLOR_OFF);
-          } else if (patch_->aux_mode < 0.45f || patch_->aux_mode > 0.55f) {
-            leds_.set(6, 2.0f > pwm_counter ? led_color: LED_COLOR_OFF);
-          }
+            if (patch_->aux_mode > 0.8f || patch_->aux_mode < 0.2f) {
+              led_color = triangle >> 1 ? led_color: LED_COLOR_OFF;
+            }
 
+            leds_.set(6, 0.5f > pwm_counter ? led_color: LED_COLOR_OFF);
+
+            if (patch_->aux_oct < 0.1f || patch_->aux_oct > 0.9f) {
+              leds_.set(6, led_color);
+            } else if (patch_->aux_oct < 0.2f || patch_->aux_oct > 0.8f) {
+              leds_.set(6, 12.0f > pwm_counter ? led_color: LED_COLOR_OFF);
+            }  else if (patch_->aux_oct < 0.3f || patch_->aux_oct > 0.7f) {
+              leds_.set(6, 8.0f > pwm_counter ? led_color: LED_COLOR_OFF);
+            }  else if (patch_->aux_oct < 0.4f || patch_->aux_oct > 0.6f) {
+              leds_.set(6, 3.0f > pwm_counter ? led_color: LED_COLOR_OFF);
+            }
+          }
           leds_.set(7, patch_->crossfade * 16.0f > pwm_counter ? LED_COLOR_RED: LED_COLOR_GREEN);
         }
       }
@@ -324,6 +329,7 @@ void Ui::ReadSwitches() {
         }
         
         if (switches_.just_pressed(Switch(0))) {
+          pots_[POTS_ADC_CHANNEL_TIMBRE_ATTENUVERTER].Lock();
           pots_[POTS_ADC_CHANNEL_FM_ATTENUVERTER].Lock();
           pots_[POTS_ADC_CHANNEL_MORPH_ATTENUVERTER].Lock();
           pots_[POTS_ADC_CHANNEL_TIMBRE_POT].Lock();
@@ -336,6 +342,7 @@ void Ui::ReadSwitches() {
         
         if (pots_[POTS_ADC_CHANNEL_MORPH_POT].editing_hidden_parameter() ||
             pots_[POTS_ADC_CHANNEL_TIMBRE_POT].editing_hidden_parameter() ||
+            pots_[POTS_ADC_CHANNEL_TIMBRE_ATTENUVERTER].editing_hidden_parameter()||
             pots_[POTS_ADC_CHANNEL_FM_ATTENUVERTER].editing_hidden_parameter()||
             pots_[POTS_ADC_CHANNEL_MORPH_ATTENUVERTER].editing_hidden_parameter()) {
           mode_ = UI_MODE_DISPLAY_ALTERNATE_PARAMETERS;
@@ -386,6 +393,7 @@ void Ui::ReadSwitches() {
           pots_[POTS_ADC_CHANNEL_MORPH_POT].Unlock();
           pots_[POTS_ADC_CHANNEL_HARMONICS_POT].Unlock();
           pots_[POTS_ADC_CHANNEL_FREQUENCY_POT].Unlock();
+          pots_[POTS_ADC_CHANNEL_TIMBRE_ATTENUVERTER].Unlock();
           pots_[POTS_ADC_CHANNEL_FM_ATTENUVERTER].Unlock();
           pots_[POTS_ADC_CHANNEL_MORPH_ATTENUVERTER].Unlock();
           press_time_[i] = 0;

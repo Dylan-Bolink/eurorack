@@ -4017,7 +4017,6 @@ const int16_t lut_ws_bump[] = {
   -32767,
 };
 
-
 const int16_t* const lookup_table_i16_table[] = {
   lut_ws_inverse_tan,
   lut_ws_inverse_sin,
@@ -4025,8 +4024,6 @@ const int16_t* const lookup_table_i16_table[] = {
   lut_ws_sin,
   lut_ws_bump,
 };
-
-
 
 const int32_t* const lookup_table_i32_table[] = {
 };

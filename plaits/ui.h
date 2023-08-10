@@ -103,7 +103,7 @@ class Ui {
   void DetectNormalization();
 
   void Navigate(int button);
-  uint32_t BankToColor(int bank, bool color_blind, int pwm_counter);
+  uint32_t BankToColor(int bank, int pwm_counter);
   
   void StartCalibration();
   void CalibrateC1();
@@ -134,6 +134,7 @@ class Ui {
   float fine_tune_;
   float transposition_;
   float octave_;
+  float aux_oct;
   float aux_mode;
   float crossfade;
   Patch* patch_;
