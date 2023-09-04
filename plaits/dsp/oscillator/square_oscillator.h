@@ -1,5 +1,4 @@
 // Dedicated minimal square wave oscillator
-// Credits to lylepmills
 
 #ifndef PLAITS_DSP_OSCILLATOR_SQUARE_OSCILLATOR_H_
 #define PLAITS_DSP_OSCILLATOR_SQUARE_OSCILLATOR_H_

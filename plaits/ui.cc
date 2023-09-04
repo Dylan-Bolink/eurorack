@@ -57,17 +57,6 @@ void Ui::Init(Patch* patch, Modulations* modulations, Settings* settings) {
   
   LoadState();
   
-  // if (switches_.pressed_immediate(SWITCH_ROW_2)) {
-  //   State* state = settings_->mutable_state();
-  //   if (state->color_blind == 1) {
-  //     state->color_blind = 0; 
-  //   } else {
-  //     state->color_blind = 1; 
-  //   }
-  //   settings_->SaveState();
-  //   ignore_release_[0] = ignore_release_[1] = true;
-  // }
-  
   // Bind pots to parameters.
   pots_[POTS_ADC_CHANNEL_FREQUENCY_POT].Init(
       &transposition_, &fine_tune_, 0.005f, 2.0f, -1.0f);
@@ -174,11 +163,15 @@ void Ui::UpdateLEDs() {
               ? patch_->lpg_colour
               : patch_->decay;
           value -= 0.001f;
+
+          //   parameter * 4 + 3 - i,
+          //     value * 64.0f > pwm_counter ? LED_COLOR_YELLOW : LED_COLOR_OFF);
+          // value -= 0.25f;
           for (int i = 0; i < 3; ++i) {
             leds_.set(
                 parameter * 3 + 2 - i,
-                value * 85.0f > pwm_counter ? LED_COLOR_YELLOW : LED_COLOR_OFF);
-            value -= 0.18f;
+                value * 24.0f > pwm_counter ? LED_COLOR_YELLOW : LED_COLOR_OFF);
+            value -= 0.25f;
           }
 
           if (patch_->aux_mode > 0.6f || patch_->aux_mode < 0.4f) {
@@ -191,8 +184,7 @@ void Ui::UpdateLEDs() {
               led_color = triangle >> 1 ? led_color: LED_COLOR_OFF;
             }
 
-            leds_.set(6, 0.5f > pwm_counter ? led_color: LED_COLOR_OFF);
-
+            leds_.set(6, 2.0f > pwm_counter ? led_color: LED_COLOR_OFF);
             if (patch_->aux_oct < 0.1f || patch_->aux_oct > 0.9f) {
               leds_.set(6, led_color);
             } else if (patch_->aux_oct < 0.2f || patch_->aux_oct > 0.8f) {
@@ -200,7 +192,7 @@ void Ui::UpdateLEDs() {
             }  else if (patch_->aux_oct < 0.3f || patch_->aux_oct > 0.7f) {
               leds_.set(6, 8.0f > pwm_counter ? led_color: LED_COLOR_OFF);
             }  else if (patch_->aux_oct < 0.4f || patch_->aux_oct > 0.6f) {
-              leds_.set(6, 3.0f > pwm_counter ? led_color: LED_COLOR_OFF);
+              leds_.set(6, 5.0f > pwm_counter ? led_color: LED_COLOR_OFF);
             }
           }
           leds_.set(7, patch_->crossfade * 16.0f > pwm_counter ? LED_COLOR_RED: LED_COLOR_GREEN);

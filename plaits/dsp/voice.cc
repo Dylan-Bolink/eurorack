@@ -101,24 +101,34 @@ void Voice::Render(
   // CV out lags behind the GATE out.
   trigger_delay_.Write(modulations.trigger);
   float trigger_value = trigger_delay_.Read(kTriggerDelay);
+
+  bool level_patched = modulations.level_patched;
+  float modulation_level = modulations.level;
+  float patch_decay = patch.decay;
+  if (modulations.trigger_patched) {
+    level_patched = false;
+    modulation_level = 0.0f;
+    patch_decay += modulations.level;
+  }
+  CONSTRAIN(patch_decay, 0.0f, 1.0f);
+
   
   bool previous_trigger_state = trigger_state_;
   if (!previous_trigger_state) {
     if (trigger_value > 0.3f) {
       trigger_state_ = true;
-      if (!modulations.level_patched) {
+      if (!level_patched) {
         lpg_envelope_.Trigger();
       }
       decay_envelope_.Trigger();
-      // engine_cv_ = modulations.engine;
+      engine_cv_ = modulations.engine;
     }
   } else {
     if (trigger_value < 0.1f) {
       trigger_state_ = false;
     }
   }
-  
-  //revert model
+
   if (!modulations.trigger_patched) {
     engine_cv_ = modulations.engine;
   }
@@ -160,15 +170,15 @@ void Voice::Render(
   } else {
     p.trigger = TRIGGER_UNPATCHED;
   }
-  
+
   const float short_decay = (200.0f * kBlockSize) / kSampleRate *
-      SemitonesToRatio(-96.0f * patch.decay);
+      SemitonesToRatio(-96.0f * patch_decay);
 
   decay_envelope_.Process(short_decay * 2.0f);
 
-  float compressed_level = 1.3f * modulations.level / (0.3f + fabsf(modulations.level));
+  float compressed_level = 1.3f * modulation_level / (0.3f + fabsf(modulation_level));
   CONSTRAIN(compressed_level, 0.0f, 1.0f);
-  p.accent = modulations.level_patched ? compressed_level : 0.8f;
+  p.accent = level_patched ? compressed_level : 0.8f;
 
   bool use_internal_envelope = modulations.trigger_patched;
 
@@ -237,7 +247,7 @@ void Voice::Render(
   e->Render(p, out_buffer_, aux_buffer_, size, &already_enveloped);
   
   bool lpg_bypass = already_enveloped || \
-      (!modulations.level_patched && !modulations.trigger_patched);
+      (!level_patched && !modulations.trigger_patched);
   bool aux_lpg_bypass = lpg_bypass;
 
   for (size_t i = 0; i < size; ++i) {
@@ -245,11 +255,11 @@ void Voice::Render(
   }
 
   const float hf = patch.lpg_colour;
-  const float decay_tail = (20.0f * kBlockSize) / kSampleRate * SemitonesToRatio(-72.0f * patch.decay + 12.0f * hf) - short_decay;
+  const float decay_tail = (20.0f * kBlockSize) / kSampleRate * SemitonesToRatio(-72.0f * patch_decay + 12.0f * hf) - short_decay;
 
   // Compute LPG parameters.
   if (!lpg_bypass) {
-    if (modulations.level_patched) {
+    if (level_patched) {
       lpg_envelope_.ProcessLP(compressed_level, short_decay, decay_tail, hf);
     } else {
       const float attack = NoteToFrequency(p.note) * float(kBlockSize) * 2.0f;
@@ -287,7 +297,7 @@ void Voice::Render(
 
     if (patch.aux_mode > 0.6f) {
       square_oscillator_.Render(frequency, aux_buffer_, size);
-    } else if (patch.aux_mode < 0.4f) {
+    } else {
       sine_oscillator_.Render(frequency, aux_buffer_, size);
     }
   }
