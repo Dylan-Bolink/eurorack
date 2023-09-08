@@ -31,6 +31,7 @@
 
 #include "stmlib/stmlib.h"
 #include "stmlib/dsp/dsp.h"
+#include "stmlib/dsp/filter.h"
 #include "stmlib/dsp/parameter_interpolator.h"
 
 #include "warps/dsp/oscillator.h"
@@ -45,6 +46,7 @@ namespace warps {
 
 const size_t kMaxBlockSize = 96;
 const size_t kOversampling = 6;
+const size_t kLessOversampling = 4;
 const size_t kNumOscillators = 1;
 
 typedef struct { short l; short r; } ShortFrame;
@@ -119,8 +121,13 @@ enum XmodAlgorithm {
   ALGORITHM_FOLD,
   ALGORITHM_ANALOG_RING_MODULATION,
   ALGORITHM_DIGITAL_RING_MODULATION,
+  ALGORITHM_RING_MODULATION,
   ALGORITHM_XOR,
   ALGORITHM_COMPARATOR,
+  ALGORITHM_COMPARATOR8,
+  ALGORITHM_CHEBYSCHEV,
+  ALGORITHM_COMPARATOR_CHEBYSCHEV,
+  ALGORITHM_BITCRUSHER,
   ALGORITHM_NOP,
   ALGORITHM_LAST
 };
@@ -142,16 +149,23 @@ class Modulator {
 
   void Init(float sample_rate);
   void Process(ShortFrame* input, ShortFrame* output, size_t size);
-  void ProcessEasterEgg(ShortFrame* input, ShortFrame* output, size_t size);
+  template<XmodAlgorithm algorithm>
+  void Process1(ShortFrame* input, ShortFrame* output, size_t size);
+  void ProcessFreqShifter(ShortFrame* input, ShortFrame* output, size_t size);
+  void ProcessVocoder(ShortFrame* input, ShortFrame* output, size_t size);
+  void ProcessBitcrusher(ShortFrame* input, ShortFrame* output, size_t size);
+  void ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size);
+  void ProcessDoppler(ShortFrame* input, ShortFrame* output, size_t size);
+  void ProcessMeta(ShortFrame* input, ShortFrame* output, size_t size);
   inline Parameters* mutable_parameters() { return &parameters_; }
   inline const Parameters& parameters() { return parameters_; }
   
   inline bool bypass() const { return bypass_; }
   inline void set_bypass(bool bypass) { bypass_ = bypass; }
 
-  inline bool easter_egg() const { return easter_egg_; }
-  inline void set_easter_egg(bool easter_egg) { easter_egg_ = easter_egg; }
-  
+  inline FeatureMode feature_mode() const { return feature_mode_; }
+  inline void set_feature_mode(FeatureMode feature_mode) { feature_mode_ = feature_mode; }
+
  private:
   template<XmodAlgorithm algorithm_1, XmodAlgorithm algorithm_2>
   void ProcessXmod(
@@ -201,35 +215,131 @@ class Modulator {
   }
   
   template<XmodAlgorithm algorithm>
-  static float Xmod(float x_1, float x_2, float parameter);
+  void ProcessXmod(
+      float p_1,
+      float p_1_end,
+      float p_2,
+      float p_2_end,
+      const float* in_1,
+      const float* in_2,
+      float* out,
+      size_t size) {
+    float step = 1.0f / static_cast<float>(size);
+    float p_1_increment = (p_1_end - p_1) * step;
+    float p_2_increment = (p_2_end - p_2) * step;
+    while (size) {
+      const float x_1 = *in_1++;
+      const float x_2 = *in_2++;
+      *out++ = Xmod<algorithm>(x_1, x_2, p_1, p_2);
+      p_1 += p_1_increment;
+      p_2 += p_2_increment;
+      size--;
+    }
+  }
+
+  template<XmodAlgorithm algorithm>
+  void ProcessXmod(
+      float p_1,
+      float p_1_end,
+      float p_2,
+      float p_2_end,
+      const float* in_1,
+      const float* in_2,
+      float* out_1,
+      float* out_2,
+      size_t size) {
+    float step = 1.0f / static_cast<float>(size);
+    float p_1_increment = (p_1_end - p_1) * step;
+    float p_2_increment = (p_2_end - p_2) * step;
+    while (size) {
+      const float x_1 = *in_1++;
+      const float x_2 = *in_2++;
+      *out_1++ = Xmod<algorithm>(x_1, x_2, p_1, p_2, out_2++); /* TODO error */
+      p_1 += p_1_increment;
+      p_2 += p_2_increment;
+      size--;
+    }
+  }
   
+  template<XmodAlgorithm algorithm>
+  static float Xmod(float x_1, float x_2, float parameter);
+
+  template<XmodAlgorithm algorithm>
+  static float Xmod(float x_1, float x_2, float p_1, float p_2);
+
+  template<XmodAlgorithm algorithm>
+  static float Xmod(float x_1, float x_2, float p_1, float p_2, float *out_2);
+
+  template<XmodAlgorithm algorithm>
+  void ProcessMod(
+      float p,
+      float p_end,
+      const float* in,
+      float* out,
+      size_t size) {
+    float step = 1.0f / static_cast<float>(size);
+    float p_increment = (p_end - p) * step;
+    while (size) {
+      const float x = *in++;
+      *out++ = Mod<algorithm>(x, p);
+      p += p_increment;
+      size--;
+    }
+  }
+
+  template<XmodAlgorithm algorithm>
+  static float Mod(float x, float p);
+
   static float Diode(float x);
   
   bool bypass_;
-  bool easter_egg_;
-  
+
+  FeatureMode feature_mode_;
+
   Parameters parameters_;
   Parameters previous_parameters_;
   
   SaturatingAmplifier amplifier_[2];
+
   Oscillator xmod_oscillator_;
   Oscillator vocoder_oscillator_;
+  Oscillator square_oscillator_;
   QuadratureOscillator quadrature_oscillator_;
-  
   SampleRateConverter<SRC_UP, kOversampling, 48> src_up_[2];
   SampleRateConverter<SRC_DOWN, kOversampling, 48> src_down_;
-
+  SampleRateConverter<SRC_UP, kLessOversampling, 48> src_up2_[2];
+  SampleRateConverter<SRC_DOWN, kLessOversampling, 48> src_down2_[2];
   Vocoder vocoder_;
-  QuadratureTransform quadrature_transform_[2];
-  
+  QuadratureTransform quadrature_transform_[2];  
+
+  stmlib::OnePole filter_[4];
+
+  /* everything that follows will be used as delay buffer */
+  ShortFrame delay_buffer_[8192+4096];  
   float internal_modulation_[kMaxBlockSize];
+  float non_modulation_[10];
   float buffer_[3][kMaxBlockSize];
   float src_buffer_[2][kMaxBlockSize * kOversampling];
-
   float feedback_sample_;
-  
+
+  enum DelaySize {
+    DELAY_SIZE = (sizeof(delay_buffer_)
+                  + sizeof(internal_modulation_)
+                  + sizeof(buffer_)
+                  + sizeof(src_buffer_)
+                  + sizeof(feedback_sample_)) / sizeof(ShortFrame) - 4
+  };
+
+  enum DelayInterpolation {
+    INTERPOLATION_ZOH,
+    INTERPOLATION_LINEAR,
+    INTERPOLATION_HERMITE,
+  };
+
+  DelayInterpolation delay_interpolation_;
+
   static XmodFn xmod_table_[];
-  
+
   DISALLOW_COPY_AND_ASSIGN(Modulator);
 };
 

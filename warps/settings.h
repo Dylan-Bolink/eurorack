@@ -43,7 +43,7 @@ struct CalibrationData {
 
 struct State {
   uint8_t carrier_shape;
-  uint8_t boot_in_easter_egg_mode;
+  uint8_t feature_mode;
 };
 
 struct SettingsData {

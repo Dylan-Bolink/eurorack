@@ -87,7 +87,7 @@ void Init() {
   sys.Init(true);
   version.Init();
 
-  // Init modulator.
+  // Init modulator. 72000.0f is the sample rate of the modulator.
   modulator.Init(96000.0f);
   settings.Init();
   cv_scaler.Init(settings.mutable_calibration_data());
