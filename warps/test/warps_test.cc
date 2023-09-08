@@ -155,7 +155,7 @@ void TestModulator() {
 }
 
 void TestEasterEgg() {
-  FILE* fp_in = fopen("audio_samples/modulation_96k.wav", "rb");
+  FILE* fp_in = fopen("audio_samples/ericderr96.wav", "rb");
   
   WavWriter wav_writer(2, kSampleRate, 15);
   wav_writer.Open("warps_easter_egg.wav");
@@ -164,7 +164,7 @@ void TestEasterEgg() {
   
   Modulator modulator;
   modulator.Init(kSampleRate);
-  modulator.set_easter_egg(true);
+  modulator.set_feature_mode(FEATURE_MODE_CHEBYSCHEV);
   
   Parameters* p = modulator.mutable_parameters();
   
@@ -178,12 +178,16 @@ void TestEasterEgg() {
     float noise = (Random::GetFloat() - 0.5f) / 128.0f;
     filtered_noise += (noise - filtered_noise) * 0.1f;
     
-    p->frequency_shift_pot = 0.85f + 0.0f * triangle + 0.0f * filtered_noise;
-    p->frequency_shift_cv = 0.0f;
-    p->carrier_shape = 1;
-    p->channel_drive[0] = 0.0f;
-    p->channel_drive[1] = 1.0f;
-    p->modulation_parameter = 0.0f + 0.0f * square;
+    p->raw_algorithm_pot = 1.0f + 0.0f * triangle + 0.0f * square;
+    p->raw_algorithm_cv = 0.0f;
+    p->raw_algorithm = 0.0f;// + 0.0f * triangle;// + 0.1f * filtered_noise;
+    p->modulation_algorithm = 0.3f;// + 1.0f * triangle;
+    p->carrier_shape = 0;
+    p->channel_drive[0] = 0.5f;
+    p->channel_drive[1] = 0.0f;
+    p->raw_level[0] = 0.6f;
+    p->raw_level[1] = 1.0f;
+    p->modulation_parameter = 1.0f;// + 0.05f * filtered_noise;
     p->note = 48.0f + phi;
 
     ShortFrame input[kBlockSize];
@@ -198,8 +202,8 @@ void TestEasterEgg() {
     }
     
     for (size_t i = 0; i < kBlockSize; ++i) {
-      input[i].r = input[i].l;
-      input[i].l = 0;
+      input[i].r = input[i].r;
+      input[i].l = input[i].l;
     }
     modulator.Process(input, output, kBlockSize);
     wav_writer.WriteFrames((short*)(output), kBlockSize);
@@ -216,7 +220,7 @@ void TestOscillators() {
   
   Parameters* p = modulator.mutable_parameters();
   
-  p->carrier_shape = 3;
+  p->carrier_shape = 1;
   p->channel_drive[0] = 0.0f;
   p->channel_drive[1] = 0.0f;
   p->modulation_algorithm = 0.0f;
@@ -369,13 +373,13 @@ void TestQuadratureOscillator() {
 
 int main(void) {
   _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
-  TestSRCUp<SampleRateConverter<SRC_UP, 6, 48> >("warps_src_up_fir_48.wav");
-  TestSRC96To576To96();
+  //TestSRCUp<SampleRateConverter<SRC_UP, 6, 48> >("warps_src_up_fir_48.wav");
+  //TestSRC96To576To96();
   // TestModulator();
-  // TestEasterEgg();
-  TestOscillators();
-  TestFilterBankReconstruction();
-  TestSineTransition();
-  TestGain();
-  TestQuadratureOscillator();
+  TestEasterEgg();
+  //TestOscillators();
+  //TestFilterBankReconstruction();
+  //TestSineTransition();
+  //TestGain();
+  //TestQuadratureOscillator();
 }

@@ -45,13 +45,13 @@ class Settings;
 
 enum UiMode {
   UI_MODE_NORMAL,
+  UI_MODE_FEATURE_SWITCH,
   UI_MODE_CALIBRATION_C1,
   UI_MODE_CALIBRATION_C3,
   UI_MODE_CALIBRATION_LOW,
   UI_MODE_CALIBRATION_HIGH,
   UI_MODE_CALIBRATION_ERROR,
   UI_MODE_PANIC,
-  UI_MODE_EASTER_EGG_DANCE
 };
 
 enum FactoryTestingCommand {
@@ -80,7 +80,6 @@ class Ui {
  private:
   void OnSwitchPressed(const stmlib::Event& e);
   void OnSwitchReleased(const stmlib::Event& e);
-
   void StartCalibration();
   void CalibrateC1();
   void CalibrateC3();
@@ -88,8 +87,7 @@ class Ui {
   void CalibrateLow();
   void CalibrateHigh();
 
-  void UpdateCarrierShape();
-  bool DetectSecretHandshake();
+  void UpdateSettings();
 
   stmlib::EventQueue<16> queue_;
   
@@ -104,10 +102,15 @@ class Ui {
   uint32_t press_time_;
   uint8_t carrier_shape_;
   uint8_t secret_handshake_[6];
+
+  float last_algo_pot_;
+  bool feature_mode_changed_;
+  uint8_t feature_mode_;
   
   static const uint8_t palette_[10][3];
-  static const uint8_t easter_egg_palette_[10][3];
-  
+  static const uint8_t freq_shifter_palette_[10][3];
+  static const uint8_t feature_mode_palette_[10][3];
+
   DISALLOW_COPY_AND_ASSIGN(Ui);
 };
 

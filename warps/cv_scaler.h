@@ -177,14 +177,16 @@ class CvScaler {
   bool normalization_probe_value_[2];
   bool normalization_probe_enabled_;
   bool normalization_probe_forced_state_;
-  
+
   float lp_state_[ADC_LAST];
   float note_cv_;
   float note_pot_;
   float note_pot_quantized_;
   float cv_c1_;
+
+  uint16_t self_calibration_state_;
   float cv_low_[2];
-  
+
   DISALLOW_COPY_AND_ASSIGN(CvScaler);
 };
 
