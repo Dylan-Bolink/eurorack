@@ -40,12 +40,14 @@ TARGET         = warps
 PACKAGES       = warps \
 		warps/drivers \
 		warps/dsp \
+		warps/dsp/filters \
+		warps/dsp/fx \
 		stmlib/dsp \
 		stmlib/utils \
 		stmlib/system
 RESOURCES      = warps/resources
 
-TOOLCHAIN_PATH ?= /usr/local/arm-4.8.3/
+TOOLCHAIN_PATH ?= ${MI_TOOLCHAIN_PATH}
 
 include stmlib/makefile.inc
 

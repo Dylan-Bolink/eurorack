@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="VcsDirectoryMappings">
+    <mapping directory="$PROJECT_DIR$" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/avr_audio_bootloader" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/avrlib" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/avrlibx" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/stm_audio_bootloader" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/stmlib" vcs="Git" />
+  </component>
+</project>

@@ -38,10 +38,11 @@ PACKAGES       = warps/bootloader \
 		warps/drivers \
 		stm_audio_bootloader/qpsk \
 		stmlib/dsp \
+		stmlib/dsp/filters \
 		stmlib/utils \
 		stmlib/system
 RESOURCES      = warps/resources
 
-TOOLCHAIN_PATH ?= /usr/local/arm-4.8.3/
+TOOLCHAIN_PATH ?= ${MI_TOOLCHAIN_PATH}
 
 include stmlib/makefile.inc

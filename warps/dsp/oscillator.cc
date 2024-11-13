@@ -139,24 +139,54 @@ float Oscillator::RenderPolyblep(
       lp_state += integrator_coefficient * (this_sample - lp_state);
       *out++ = lp_state;
     } else {
-      if (phase >= 1.0f) {
+      /*if (phase >= 1.0f) {
         phase -= 1.0f;
         float t = phase / modulated_increment;
         this_sample -= ThisBlepSample(t);
         next_sample -= NextBlepSample(t);
-      }
-      next_sample += phase;
+      }*/
+      //next_sample += phase;
       
       if (shape == OSCILLATOR_SHAPE_SAW) {
+        if (phase >= 1.0f) {
+          phase -= 1.0f;
+          float t = phase / modulated_increment;
+          this_sample -= ThisBlepSample(t);
+          next_sample -= NextBlepSample(t);
+        }
+        next_sample += phase;
         this_sample = this_sample * 2.0f - 1.0f;
         // Slight roll-off of high frequencies - prevent high components near
         // 48kHz that are not eliminated by the upsampling filter.
         lp_state += 0.3f * (this_sample - lp_state);
         *out++ = lp_state;
       } else {
-        lp_state += 0.25f * ((hp_state - this_sample) - lp_state);
-        *out++ = 4.0f * lp_state;
-        hp_state = this_sample;
+        if (high ^ (phase >= 0.5f)) {
+          float t = (phase - 0.5f) / modulated_increment;
+          float discontinuity = 1.0f;
+          if (modulated_increment < 0.0f) {
+            discontinuity = -discontinuity;
+          }
+          this_sample += ThisBlepSample(t) * discontinuity;
+          next_sample += NextBlepSample(t) * discontinuity;
+          high = phase >= 0.5f;
+        }
+        if (phase >= 1.0f) {
+          phase -= 1.0f;
+          float t = phase / modulated_increment;
+          this_sample -= ThisBlepSample(t);
+          next_sample -= NextBlepSample(t);
+          high = false;
+        } else if (phase < 0.0f) {
+          float t = phase / modulated_increment;
+          phase += 1.0f;
+          this_sample += ThisBlepSample(t);
+          next_sample += NextBlepSample(t);
+          high = true;
+        }
+        next_sample += phase < 0.5f ? 0.0f : 1.0f;
+        this_sample = 2.0f * this_sample - 1.0f;
+        *out++ = this_sample;
       }
     }
   }

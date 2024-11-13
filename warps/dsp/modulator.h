@@ -41,13 +41,25 @@
 #include "warps/dsp/sample_rate_converter.h"
 #include "warps/dsp/vocoder.h"
 #include "warps/resources.h"
+#include "warps/dsp/filters/dual_filter.h"
+#include "warps/dsp/fx/reverb.h"
+#include "warps/dsp/fx/ensemble.h"
+//#include "warps/dsp/fx/pitch_shifter.h"
 
 namespace warps {
+
+using namespace std;
 
 const size_t kMaxBlockSize = 96;
 const size_t kOversampling = 6;
 const size_t kLessOversampling = 4;
 const size_t kNumOscillators = 1;
+const float kXmodCarrierGain = 0.5f;
+
+static Reverb reverb;
+static DualFilter df;
+static Ensemble ensemble;
+//static PitchShifter pitch_shifter;
 
 typedef struct { short l; short r; } ShortFrame;
 typedef struct { float l; float r; } FloatFrame;
@@ -124,9 +136,7 @@ enum XmodAlgorithm {
   ALGORITHM_RING_MODULATION,
   ALGORITHM_XOR,
   ALGORITHM_COMPARATOR,
-  ALGORITHM_COMPARATOR8,
   ALGORITHM_CHEBYSCHEV,
-  ALGORITHM_COMPARATOR_CHEBYSCHEV,
   ALGORITHM_BITCRUSHER,
   ALGORITHM_NOP,
   ALGORITHM_LAST
@@ -147,14 +157,16 @@ class Modulator {
   Modulator() { }
   ~Modulator() { }
 
-  void Init(float sample_rate);
+  void Init(float sample_rate, uint16_t* reverb_buffer);
   void Process(ShortFrame* input, ShortFrame* output, size_t size);
-  template<XmodAlgorithm algorithm>
-  void Process1(ShortFrame* input, ShortFrame* output, size_t size);
+  void ProcessChebyschev(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessFreqShifter(ShortFrame* input, ShortFrame* output, size_t size);
-  void ProcessVocoder(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessBitcrusher(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size);
+  void ProcessDualFilter(ShortFrame* input, ShortFrame* output, size_t size, FilterConfig config);
+  void ProcessReverb(ShortFrame* input, ShortFrame* output, size_t size);
+  void ProcessEnsemble(ShortFrame* input, ShortFrame* output, size_t size);
+  //void ProcessPitchShifter(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessDoppler(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessMeta(ShortFrame* input, ShortFrame* output, size_t size);
   inline Parameters* mutable_parameters() { return &parameters_; }
@@ -164,9 +176,80 @@ class Modulator {
   inline void set_bypass(bool bypass) { bypass_ = bypass; }
 
   inline FeatureMode feature_mode() const { return feature_mode_; }
-  inline void set_feature_mode(FeatureMode feature_mode) { feature_mode_ = feature_mode; }
+  inline bool alt_feature_mode() const { return alt_feature_mode_; }
+  
+  inline void set_feature_mode(FeatureMode feature_mode) { 
+    bool is_fx = feature_mode_ == FEATURE_MODE_REVERB || feature_mode_ == FEATURE_MODE_ENSEMBLE || feature_mode_ == FEATURE_MODE_DELAY;
+    if (is_fx && feature_mode != feature_mode_) {
+      reset_fx = true;
+    }
+    
+    feature_mode_ = feature_mode; 
+  }
+
+  inline void set_alt_feature_mode(bool alt_feature_mode) {
+    alt_feature_mode_ = alt_feature_mode;
+  }
 
  private:
+
+  void ApplyAmplification(ShortFrame* input, float* level, float* aux_output, size_t size, bool raw_level) {
+    if (!parameters_.carrier_shape || raw_level) {
+      fill(&aux_output[0], &aux_output[size], 0.0f);
+    }
+    // Convert audio inputs to float and apply VCA/saturation (5.8% per channel)
+    short* input_samples = &input->l;
+    
+    for (int32_t i = (parameters_.carrier_shape && !raw_level) ? 1 : 0; i < 2; ++i) {
+      amplifier_[i].Process(
+          level[i],
+          1.0f,
+          input_samples + i,
+          buffer_[i],
+          aux_output,
+          2,
+          size);
+    }
+  }
+
+  void RenderCarrier(
+    ShortFrame* input, 
+    float* carrier, 
+    float* aux_output, 
+    size_t size, 
+    bool exclude_sine = false, 
+    bool amp_control = false, 
+    float level = 0.5f
+  ) {
+    // Scale phase-modulation input.
+      for (size_t i = 0; i < size; ++i) {
+        internal_modulation_[i] = static_cast<float>(input[i].l) / 32768.0f;
+      }
+
+      OscillatorShape xmod_shape = static_cast<OscillatorShape>(
+          parameters_.carrier_shape - (exclude_sine ? 0 : 1));
+      xmod_oscillator_.Render(
+        xmod_shape,
+        parameters_.note,
+        internal_modulation_,
+        aux_output,
+        size);
+
+      for (size_t i = 0; i < size; ++i) {
+        carrier[i] = aux_output[i] * (amp_control ? level : 0.5f);
+      }
+  }
+
+  void Convert(ShortFrame* output, float* main_output, float* aux_output, float aux_gain, size_t size) {
+      while (size--) {
+      output->l = Clip16(static_cast<int32_t>(*main_output * 32768.0f));
+      output->r = Clip16(static_cast<int32_t>(*aux_output * aux_gain));
+      ++main_output;
+      ++aux_output;
+      ++output;
+    }
+  }
+
   template<XmodAlgorithm algorithm_1, XmodAlgorithm algorithm_2>
   void ProcessXmod(
       float balance,
@@ -293,7 +376,9 @@ class Modulator {
   static float Diode(float x);
   
   bool bypass_;
-
+  bool reset_fx;
+  bool alt_feature_mode_;
+  int32_t transpose_;
   FeatureMode feature_mode_;
 
   Parameters parameters_;
@@ -303,7 +388,6 @@ class Modulator {
 
   Oscillator xmod_oscillator_;
   Oscillator vocoder_oscillator_;
-  Oscillator square_oscillator_;
   QuadratureOscillator quadrature_oscillator_;
   SampleRateConverter<SRC_UP, kOversampling, 48> src_up_[2];
   SampleRateConverter<SRC_DOWN, kOversampling, 48> src_down_;
@@ -317,7 +401,6 @@ class Modulator {
   /* everything that follows will be used as delay buffer */
   ShortFrame delay_buffer_[8192+4096];  
   float internal_modulation_[kMaxBlockSize];
-  float non_modulation_[10];
   float buffer_[3][kMaxBlockSize];
   float src_buffer_[2][kMaxBlockSize * kOversampling];
   float feedback_sample_;

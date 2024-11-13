@@ -42,13 +42,13 @@ enum OscillatorShape {
 };
 
 enum FeatureMode {
-  FEATURE_MODE_DOPPLER,
-  FEATURE_MODE_FOLD,
-  FEATURE_MODE_CHEBYSCHEV,
+  FEATURE_MODE_DUAL_FILTER,
+  FEATURE_MODE_ENSEMBLE,
+  FEATURE_MODE_REVERB,
   FEATURE_MODE_FREQUENCY_SHIFTER,
   FEATURE_MODE_BITCRUSHER,
-  FEATURE_MODE_COMPARATOR,
-  FEATURE_MODE_VOCODER,
+  FEATURE_MODE_CHEBYSCHEV,
+  FEATURE_MODE_DOPPLER,
   FEATURE_MODE_DELAY,
   FEATURE_MODE_META,
 };
@@ -59,10 +59,15 @@ struct Parameters {
   float modulation_parameter;
   
   // Raw parameters.
+  float raw_level_pot[2];
+  float raw_level_cv[2];
   float raw_level[2];
   float raw_algorithm_pot;
   float raw_algorithm_cv;
   float raw_algorithm;
+  float raw_modulation_pot;
+  float raw_modulation_cv;
+  float raw_modulation;
   float note;
 
   int32_t carrier_shape;  // 0 = external

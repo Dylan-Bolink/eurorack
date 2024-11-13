@@ -43,6 +43,10 @@ DebugPort debug_port;
 Modulator modulator;
 Settings settings;
 Ui ui;
+//const float kSampleRate = 48000.0f; 
+const float kSampleRate = 96000.0f;
+
+uint16_t reverb_buffer[32768] __attribute__ ((section (".ccmdata")));
 
 int __errno;
 
@@ -87,14 +91,14 @@ void Init() {
   sys.Init(true);
   version.Init();
 
-  // Init modulator. 72000.0f is the sample rate of the modulator.
-  modulator.Init(96000.0f);
+  // Init modulator.
+  modulator.Init(kSampleRate, reverb_buffer);
   settings.Init();
   cv_scaler.Init(settings.mutable_calibration_data());
   
   ui.Init(&settings, &cv_scaler, &modulator);
   
-  if (!codec.Init(!version.revised(), 96000)) {
+  if (!codec.Init(!version.revised(), kSampleRate)) {
     ui.Panic();
   }
   if (!codec.Start(60, &FillBuffer)) {

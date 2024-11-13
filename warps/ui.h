@@ -104,8 +104,11 @@ class Ui {
   uint8_t secret_handshake_[6];
 
   float last_algo_pot_;
+  float last_mod_pot_;
   bool feature_mode_changed_;
+  bool alternate_mode_changed_;
   uint8_t feature_mode_;
+  bool alt_feature_mode_;
   
   static const uint8_t palette_[10][3];
   static const uint8_t freq_shifter_palette_[10][3];

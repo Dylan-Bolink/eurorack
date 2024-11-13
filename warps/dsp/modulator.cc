@@ -41,9 +41,7 @@ namespace warps {
 using namespace std;
 using namespace stmlib;
 
-const float kXmodCarrierGain = 0.5f;
-
-void Modulator::Init(float sample_rate) {
+void Modulator::Init(float sample_rate, uint16_t* reverb_buffer) {
   bypass_ = false;
   feature_mode_ = FEATURE_MODE_META;
 
@@ -58,9 +56,11 @@ void Modulator::Init(float sample_rate) {
 
   xmod_oscillator_.Init(sample_rate);
   vocoder_oscillator_.Init(sample_rate);
-  square_oscillator_.Init(24000.0f);
   quadrature_oscillator_.Init(sample_rate);
   vocoder_.Init(sample_rate);
+  df.Init();
+  reverb.Init(reverb_buffer);
+  ensemble.Init(reverb_buffer);
 
   previous_parameters_.carrier_shape = 0;
   previous_parameters_.channel_drive[0] = 0.0f;
@@ -200,78 +200,6 @@ void Modulator::ProcessFreqShifter(
   previous_parameters_ = parameters_;
 }
 
-void Modulator::ProcessVocoder(
-    ShortFrame* input,
-    ShortFrame* output,
-    size_t size) {
-  float* carrier = buffer_[0];
-  float* modulator = buffer_[1];
-  float* main_output = buffer_[0];
-  float* aux_output = buffer_[2];
-
-  if (!parameters_.carrier_shape) {
-    fill(&aux_output[0], &aux_output[size], 0.0f);
-  }
-
-  // Convert audio inputs to float and apply VCA/saturation (5.8% per channel)
-  short* input_samples = &input->l;
-  for (int32_t i = parameters_.carrier_shape ? 1 : 0; i < 2; ++i) {
-      amplifier_[i].Process(
-          parameters_.channel_drive[i],
-          1.0f,
-          input_samples + i,
-          buffer_[i],
-          aux_output,
-          2,
-          size);
-  }
-
-  // If necessary, render carrier. Otherwise, sum signals 1 and 2 for aux out.
-  if (parameters_.carrier_shape) {
-    // Scale phase-modulation input.
-    for (size_t i = 0; i < size; ++i) {
-      internal_modulation_[i] = static_cast<float>(input[i].l) / 32768.0f;
-    }
-    OscillatorShape vocoder_shape = static_cast<OscillatorShape>(
-        parameters_.carrier_shape + 1);
-    OscillatorShape square_shape = static_cast<OscillatorShape>(3);
-
-    // Outside of the transition zone between the cross-modulation and vocoding
-    // algorithm, we need to render only one of the two oscillators.
-    float carrier_gain = vocoder_oscillator_.Render(
-          vocoder_shape,
-          parameters_.note,
-          internal_modulation_,
-          carrier,
-          size);
-    
-    square_oscillator_.Render(
-          square_shape,
-          parameters_.note,
-          non_modulation_,
-          aux_output,
-          size);
-    for (size_t i = 0; i < size; ++i) {
-      carrier[i] = carrier[i] * carrier_gain;
-    }
-  }
-
-  float release_time = parameters_.modulation_parameter;
-  vocoder_.set_release_time(release_time * (2.0f - release_time));
-  vocoder_.set_formant_shift(parameters_.modulation_algorithm);
-  vocoder_.Process(modulator, carrier, main_output, size);
-
-  // Convert back to integer and clip.
-  while (size--) {
-    output->l = Clip16(static_cast<int32_t>(*main_output * 32768.0f));
-    output->r = Clip16(static_cast<int32_t>(*aux_output * 16384.0f));
-    ++main_output;
-    ++aux_output;
-    ++output;
-  }
-  previous_parameters_ = parameters_;
-}
-
 void Modulator::ProcessMeta(
     ShortFrame* input,
     ShortFrame* output,
@@ -318,7 +246,6 @@ void Modulator::ProcessMeta(
         parameters_.carrier_shape - 1);
     OscillatorShape vocoder_shape = static_cast<OscillatorShape>(
         parameters_.carrier_shape + 1);
-    OscillatorShape square_shape = static_cast<OscillatorShape>(3);
 
     // Outside of the transition zone between the cross-modulation and vocoding
     // algorithm, we need to render only one of the two oscillators.
@@ -327,20 +254,10 @@ void Modulator::ProcessMeta(
           xmod_shape,
           parameters_.note,
           internal_modulation_,
-          carrier,
+          aux_output,
           size);
-
-
-      //needs refinement is leaking on aux output when
-      square_oscillator_.Render(
-        square_shape,
-        parameters_.note,
-        non_modulation_,
-        aux_output,
-        size);
-
       for (size_t i = 0; i < size; ++i) {
-        carrier[i] = carrier[i] * kXmodCarrierGain;
+        carrier[i] = aux_output[i] * kXmodCarrierGain;
       }
     } else if (vocoder_amount >= 0.5f) {
       float carrier_gain = vocoder_oscillator_.Render(
@@ -349,14 +266,6 @@ void Modulator::ProcessMeta(
           internal_modulation_,
           aux_output,
           size);
-      
-      //needs refinement is leaking on aux output when
-      square_oscillator_.Render(
-        square_shape,
-        parameters_.note,
-        non_modulation_,
-        aux_output,
-        size);
       for (size_t i = 0; i < size; ++i) {
         carrier[i] = aux_output[i] * carrier_gain;
       }
@@ -383,8 +292,6 @@ void Modulator::ProcessMeta(
         carrier[i] = a + (b - a) * balance;
       }
     }
-
-
   }
 
   if (vocoder_amount < 0.5f) {
@@ -434,18 +341,158 @@ void Modulator::ProcessMeta(
   }
 
   // Convert back to integer and clip.
-  while (size--) {
-    output->l = Clip16(static_cast<int32_t>(*main_output * 32768.0f));
-    output->r = Clip16(static_cast<int32_t>(*aux_output * 16384.0f));
-    ++main_output;
-    ++aux_output;
-    ++output;
-  }
+  Convert(output, main_output, aux_output, 16384.0f, size);
   previous_parameters_ = parameters_;
 }
 
-template<XmodAlgorithm algorithm>
-void Modulator::Process1(ShortFrame* input, ShortFrame* output, size_t size) {
+void Modulator::ProcessDualFilter(ShortFrame* input, ShortFrame* output, size_t size, FilterConfig config) {
+  float* carrier = buffer_[0];
+  float* modulator = buffer_[1];
+  float* main_output = buffer_[0];
+  float* aux_output = buffer_[2];
+  
+  df.SetConfig(config);
+  df.SetLayout(parameters_.carrier_shape);
+  switch (config)
+  {
+  case DUAL_FILTER:
+    {
+      ApplyAmplification(input, parameters_.raw_level_cv, aux_output, size, true);
+      df.SetFreqsRes(
+        previous_parameters_.raw_algorithm, 
+        previous_parameters_.raw_level_pot[0], 
+        previous_parameters_.raw_modulation, 
+        previous_parameters_.raw_level_pot[1]
+      );
+    }
+    break;
+  default:
+    {
+      ApplyAmplification(input, parameters_.channel_drive, aux_output, size, true);
+      df.SetFreqsRes(
+        previous_parameters_.raw_algorithm, 
+        previous_parameters_.raw_modulation / 1.5f, 
+        previous_parameters_.raw_algorithm, 
+        previous_parameters_.raw_modulation / 1.5f
+      );
+    }
+    break;
+  }
+  
+  for (size_t i = 0; i < size; i++) {
+    float* out = df.Process(carrier[i], modulator[i]);
+    main_output[i] = out[0];
+    aux_output[i] = out[1];
+  }
+
+  Convert(output, main_output, aux_output, 32768.0f, size);
+  previous_parameters_ = parameters_;
+}
+
+void Modulator::ProcessReverb(ShortFrame* input, ShortFrame* output, size_t size) {
+  float* carrier = buffer_[0];
+  float* modulator = buffer_[1];
+  float* main_output = buffer_[0];
+  float* aux_output = buffer_[2];
+
+  ApplyAmplification(input, parameters_.raw_level_cv, aux_output, size, true);
+
+  ReverbType reverb_type = static_cast<ReverbType>(parameters_.carrier_shape);
+  reverb.set_type(reverb_type);
+  reverb.set_input_gain(0.2f);
+  reverb.set_lp(previous_parameters_.raw_level_pot[1]);
+  reverb.set_amount(previous_parameters_.raw_level_pot[0]);
+  reverb.set_diffusion(previous_parameters_.raw_algorithm);
+  reverb.set_time(previous_parameters_.modulation_parameter);
+
+  for (size_t i = 0; i < size; i++) {
+    main_output[i] = carrier[i];
+    aux_output[i] = modulator[i];
+  }
+
+  reverb.Process(main_output, aux_output, size);
+
+  Convert(output, main_output, aux_output, 32768.0f, size);
+  previous_parameters_ = parameters_;
+}
+
+void Modulator::ProcessEnsemble(ShortFrame* input, ShortFrame* output, size_t size) {
+  float* carrier = buffer_[0];
+  float* modulator = buffer_[1];
+  float* main_output = buffer_[0];
+  float* aux_output = buffer_[2];
+
+  ApplyAmplification(input, parameters_.channel_drive, aux_output, size, true);
+  
+
+  df.SetLayout(LP);
+  df.SetFreqsRes(
+    previous_parameters_.raw_algorithm, 
+    0.0f, 
+    previous_parameters_.raw_algorithm, 
+    0.0f
+  );
+
+  if (parameters_.carrier_shape) {
+    RenderCarrier(input, carrier, aux_output, size, true, true, parameters_.raw_level[1]);
+  }
+
+  for (size_t i = 0; i < size; i++) {
+    float* out = df.Process(carrier[i], modulator[i]);
+    main_output[i] = out[0];
+    aux_output[i] = out[1];
+  }
+
+  float depth = 0.35f + 0.65f * previous_parameters_.modulation_parameter;
+  ensemble.set_amount(previous_parameters_.modulation_parameter);
+  ensemble.set_depth(depth);
+  ensemble.Process(main_output, aux_output, size);
+
+  Convert(output, main_output, aux_output, 32768.0f, size);
+  previous_parameters_ = parameters_;
+}
+
+/*void Modulator::ProcessPitchShifter(ShortFrame* input, ShortFrame* output, size_t size) {
+  float* carrier = buffer_[0];
+  float* modulator = buffer_[1];
+  float* main_output = buffer_[0];
+  float* aux_output = buffer_[2];
+
+  ApplyAmplification(input, parameters_.channel_drive, aux_output, size, true);
+
+  float transpose = 25.0f * previous_parameters_.raw_algorithm;
+  float hysteresis = transpose - transpose_ > 0.0f ? -0.3f : +0.3f;
+  transpose_ = static_cast<uint32_t>(transpose + hysteresis + 0.5f);
+
+  if (parameters_.carrier_shape == 0) {
+    pitch_shifter.set_ratio(SemitonesToRatio(-12.0f + transpose));
+  } else if (parameters_.carrier_shape == 1) {
+    float t1 = floor(25.0f * previous_parameters_.raw_algorithm);
+    pitch_shifter.set_ratio(SemitonesToRatio(-12.0f + t1));
+  } else { // if (parameters_.carrier_shape == 2)
+    float octave = floor(4.0f * previous_parameters_.raw_algorithm) - 2.0f;//static_cast<float>(((transpose_ / 6) % 5) - 2);
+    pitch_shifter.set_ratio(SemitonesToRatio(12.0f * octave));
+  }
+  pitch_shifter.set_size(0.7383f);
+  //pitch_shifter.set_size(previous_parameters_.raw_modulation);
+
+  for (size_t i = 0; i < size; i++) {
+    main_output[i] = carrier[i];
+    aux_output[i] = modulator[i];
+  }
+
+  pitch_shifter.Process(main_output, aux_output, size);
+
+  for (size_t i = 0; i < size; i++) {
+    main_output[i] = (main_output[i] + carrier[i]) * 0.5f;
+    aux_output[i] = (aux_output[i] + modulator[i]) * 0.5f;
+  }
+
+  Convert(output, main_output, aux_output, 32768.0f, size);
+  previous_parameters_ = parameters_;
+}*/
+
+void Modulator::ProcessChebyschev(ShortFrame* input, ShortFrame* output, size_t size) {
   float* carrier = buffer_[0];
   float* modulator = buffer_[1];
   float* main_output = buffer_[0];
@@ -454,75 +501,29 @@ void Modulator::Process1(ShortFrame* input, ShortFrame* output, size_t size) {
   float* oversampled_modulator = src_buffer_[1];
   float* oversampled_output = src_buffer_[0];
 
-  if (!parameters_.carrier_shape) {
-    fill(&aux_output[0], &aux_output[size], 0.0f);
-  }
-
-  // Convert audio inputs to float and apply VCA/saturation (5.8% per channel)
-  short* input_samples = &input->l;
-  for (int32_t i = parameters_.carrier_shape ? 1 : 0; i < 2; ++i) {
-      amplifier_[i].Process(
-          parameters_.channel_drive[i],
-          1.0f,
-          input_samples + i,
-          buffer_[i],
-          aux_output,
-          2,
-          size);
-  }
+  ApplyAmplification(input, parameters_.channel_drive, aux_output, size, false);
 
   // If necessary, render carrier. Otherwise, sum signals 1 and 2 for aux out.
   if (parameters_.carrier_shape) {
-    // Scale phase-modulation input.
-    for (size_t i = 0; i < size; ++i) {
-      internal_modulation_[i] = static_cast<float>(input[i].l) / 32768.0f;
-      non_modulation_[i] = static_cast<float>(0);
-    }
-
-    OscillatorShape xmod_shape = static_cast<OscillatorShape>(
-        parameters_.carrier_shape - 1);
-    xmod_oscillator_.Render(
-          xmod_shape,
-          parameters_.note,
-          internal_modulation_,
-          carrier,
-          size);
-
-    OscillatorShape square_shape = static_cast<OscillatorShape>(3);
-    square_oscillator_.Render(
-          square_shape,
-          parameters_.note,
-          non_modulation_,
-          aux_output,
-          size);
-    for (size_t i = 0; i < size; ++i) {
-      carrier[i] = carrier[i] * kXmodCarrierGain;
-    }
+    RenderCarrier(input, carrier, aux_output, size);
   }
 
   src_up2_[0].Process(carrier, oversampled_carrier, size);
   src_up2_[1].Process(modulator, oversampled_modulator, size);
 
-  ProcessXmod<algorithm>(
-        previous_parameters_.modulation_algorithm,
-        parameters_.modulation_algorithm,
-        previous_parameters_.skewed_modulation_parameter(),
-        parameters_.skewed_modulation_parameter(),
-        oversampled_modulator,
-        oversampled_carrier,
-        oversampled_output,
-        size * kLessOversampling);
+  ProcessXmod<ALGORITHM_CHEBYSCHEV>(
+    previous_parameters_.modulation_algorithm,
+    parameters_.modulation_algorithm,
+    previous_parameters_.skewed_modulation_parameter(),
+    parameters_.skewed_modulation_parameter(),
+    oversampled_modulator, // or modulator
+    oversampled_carrier, // or carrier
+    oversampled_output, // or main_output
+    size * kLessOversampling); // or size
 
   src_down2_[0].Process(oversampled_output, main_output, size * kLessOversampling);
 
-  // Convert back to integer and clip.
-  while (size--) {
-    output->l = Clip16(static_cast<int32_t>(*main_output * 32768.0f));
-    output->r = Clip16(static_cast<int32_t>(*aux_output * 16384.0f));
-    ++main_output;
-    ++aux_output;
-    ++output;
-  }
+  Convert(output, main_output, aux_output, 16384.0f, size);
   previous_parameters_ = parameters_;
 }
 
@@ -532,50 +533,11 @@ void Modulator::ProcessBitcrusher(ShortFrame* input, ShortFrame* output, size_t 
   float* main_output = buffer_[0];
   float* aux_output = buffer_[2];
 
-  if (!parameters_.carrier_shape) {
-    fill(&aux_output[0], &aux_output[size], 0.0f);
-  }
-
-  // Convert audio inputs to float and apply VCA/saturation (5.8% per channel)
-  short* input_samples = &input->l;
-  for (int32_t i = parameters_.carrier_shape ? 1 : 0; i < 2; ++i) {
-      amplifier_[i].Process(
-          parameters_.channel_drive[i],
-          1.0f,
-          input_samples + i,
-          buffer_[i],
-          aux_output,
-          2,
-          size);
-  }
+  ApplyAmplification(input, parameters_.channel_drive, aux_output, size, false);
 
   // If necessary, render carrier. Otherwise, sum signals 1 and 2 for aux out.
   if (parameters_.carrier_shape) {
-    // Scale phase-modulation input.
-    for (size_t i = 0; i < size; ++i) {
-      internal_modulation_[i] = static_cast<float>(input[i].l) / 32768.0f;
-      non_modulation_[i] = static_cast<float>(0);
-    }
-
-    OscillatorShape xmod_shape = static_cast<OscillatorShape>(
-        parameters_.carrier_shape - 1);
-    xmod_oscillator_.Render(
-          xmod_shape,
-          parameters_.note,
-          internal_modulation_,
-          carrier,
-          size);
-
-    OscillatorShape square_shape = static_cast<OscillatorShape>(3);
-    square_oscillator_.Render(
-          square_shape,
-          parameters_.note,
-          non_modulation_,
-          aux_output,
-          size);
-    for (size_t i = 0; i < size; ++i) {
-      carrier[i] = carrier[i] * kXmodCarrierGain;
-    }
+    RenderCarrier(input, carrier, aux_output, size);
   }
 
   // make sure it dry: parameter doesn't go to 0.0f apparently
@@ -590,19 +552,13 @@ void Modulator::ProcessBitcrusher(ShortFrame* input, ShortFrame* output, size_t 
         mod_1,
         mod_2,
         carrier,
-  modulator,
+        modulator,
         main_output,
-  aux_output,
+        aux_output,
         size);
 
   // Convert back to integer and clip.
-  while (size--) {
-    output->l = Clip16(static_cast<int32_t>(*main_output * 32768.0f));
-    output->r = Clip16(static_cast<int32_t>(*aux_output * 16384.0f));
-    ++main_output;
-    ++aux_output;
-    ++output;
-  }
+  Convert(output, main_output, aux_output, 16384.0f, size);
   previous_parameters_ = parameters_;
 
 }
@@ -938,37 +894,43 @@ void Modulator::Process(ShortFrame* input, ShortFrame* output, size_t size) {
     copy(&input[0], &input[size], &output[0]);
     return;
   }
+  if (reset_fx) {
+    reverb.Clear();
+    ensemble.Reset();
+    reset_fx = false;
+  }
 
   switch (feature_mode_) {
 
-  case FEATURE_MODE_DOPPLER:
-    ProcessDoppler(input, output, size);
+  case FEATURE_MODE_DUAL_FILTER:
+    ProcessDualFilter(input, output, size, alt_feature_mode_ ? DUAL_FILTER : STEREO_FILTER);
     break;
 
-  case FEATURE_MODE_FOLD:
-    Process1<ALGORITHM_FOLD>(input, output, size);
+  case FEATURE_MODE_ENSEMBLE:
+    ProcessEnsemble(input, output, size);
     break;
 
-  case FEATURE_MODE_CHEBYSCHEV:
-    parameters_.modulation_parameter = 0.7f +
-      parameters_.modulation_parameter * 0.3f;
-    Process1<ALGORITHM_CHEBYSCHEV>(input, output, size);
+  case FEATURE_MODE_REVERB:
+    ProcessReverb(input, output, size);
     break;
 
   case FEATURE_MODE_FREQUENCY_SHIFTER:
     ProcessFreqShifter(input, output, size);
+    //ProcessPitchShifter(input, output, size);
     break;
 
   case FEATURE_MODE_BITCRUSHER:
     ProcessBitcrusher(input, output, size);
     break;
 
-  case FEATURE_MODE_COMPARATOR:
-    Process1<ALGORITHM_COMPARATOR_CHEBYSCHEV>(input, output, size);
+  case FEATURE_MODE_CHEBYSCHEV: 
+    parameters_.modulation_parameter = 0.7f + 0.3f * parameters_.modulation_parameter;
+    parameters_.modulation_algorithm = 0.005f + 0.695f * parameters_.modulation_algorithm;
+    ProcessChebyschev(input, output, size);
     break;
 
-  case FEATURE_MODE_VOCODER:
-    ProcessVocoder(input, output, size);
+  case FEATURE_MODE_DOPPLER:
+    ProcessDoppler(input, output, size);
     break;
 
   case FEATURE_MODE_DELAY:
@@ -1011,8 +973,8 @@ inline float Modulator::Mod<ALGORITHM_CHEBYSCHEV>(
 
   static float envelope_;
 
-
-  SLOPE(envelope_, fabs(x), att, rel);
+  float error = fabs(x) - envelope_;
+  envelope_ += (error > 0.0f ? att : rel) * error;
   float amp = 0.9f / envelope_;
 
   const float degree = 6.0f;
@@ -1033,6 +995,38 @@ inline float Modulator::Mod<ALGORITHM_CHEBYSCHEV>(
 
 /* static */
 template<>
+inline float Modulator::Xmod<ALGORITHM_BITCRUSHER>(
+    float x_1, float x_2, float p_1, float p_2, float *y_2) {
+  short x_1_short = Clip16(static_cast<int32_t>(x_1 * 32768.0f));
+  short x_2_short = Clip16(static_cast<int32_t>(x_2 * 32768.0f));
+
+  const float steps = 37.0f;
+  float z = p_1 * p_1 * steps;
+  MAKE_INTEGRAL_FRACTIONAL(z);
+
+  short z_short_1 = Clip16(static_cast<int32_t>(z_integral/steps * 32768.0f));
+  short z_short_2 = Clip16(static_cast<int32_t>((z_integral + 1.0f)/steps * 32768.0f));
+
+  short x_1_mod_1 = x_1_short | z_short_1;
+  short x_1_mod_2 = x_1_short | z_short_2;
+  short x_1_mod = x_1_mod_1 + (x_1_mod_2 - x_1_mod_1) * z_fractional;
+
+  short x_2_mod_1 = x_2_short | z_short_1;
+  short x_2_mod_2 = x_2_short | z_short_2;
+  short x_2_mod = x_2_mod_1 + (x_2_mod_2 - x_2_mod_1) * z_fractional;
+
+  *y_2 = static_cast<float>(x_1_mod) / 32768.0f;
+
+  float ops[4];
+  ops[0] = static_cast<float>(x_1_mod + x_2_mod) / 32768.0f;
+  ops[1] = static_cast<float>(x_1_mod | x_2_mod) / 32768.0f;
+  ops[2] = static_cast<float>(x_1_mod ^ x_2_mod) / 32768.0f;
+  ops[3] = static_cast<float>(x_1_mod << (x_2_mod >> 12)) / 32768.0f;
+  return Interpolate(ops, p_2, 3.0f);
+}
+
+/* static */
+template<>
 inline float Modulator::Xmod<ALGORITHM_FOLD>(
     float x_1, float x_2, float parameter) {
   float sum = 0.0f;
@@ -1042,20 +1036,6 @@ inline float Modulator::Xmod<ALGORITHM_FOLD>(
   sum *= 0.02f + parameter;
   const float kScale = 2048.0f / ((1.0f + 1.0f + 0.25f) * 1.02f);
   return Interpolate(lut_bipolar_fold + 2048, sum, kScale) * -0.8f;
-}
-
-/* static */
-template<>
-inline float Modulator::Xmod<ALGORITHM_FOLD>(
-    float x_1, float x_2, float p_1, float p_2) {
-  float sum = 0.0f;
-  sum += x_1;
-  sum += x_2;
-  sum += x_1 * x_2 * 0.25f;
-  sum *= 0.02f + p_1;
-  sum += p_2;
-  const float kScale = 2048.0f / ((1.0f + 1.0f + 0.25f) * 1.02f);
-  return Interpolate(lut_bipolar_fold + 2048, sum, kScale);
 }
 
 /* static */
@@ -1098,38 +1078,6 @@ inline float Modulator::Xmod<ALGORITHM_XOR>(
 
 /* static */
 template<>
-inline float Modulator::Xmod<ALGORITHM_BITCRUSHER>(
-    float x_1, float x_2, float p_1, float p_2, float *y_2) {
-  short x_1_short = Clip16(static_cast<int32_t>(x_1 * 32768.0f));
-  short x_2_short = Clip16(static_cast<int32_t>(x_2 * 32768.0f));
-
-  const float steps = 37.0f;
-  float z = p_1 * p_1 * steps;
-  MAKE_INTEGRAL_FRACTIONAL(z);
-
-  short z_short_1 = Clip16(static_cast<int32_t>(z_integral/steps * 32768.0f));
-  short z_short_2 = Clip16(static_cast<int32_t>((z_integral + 1.0f)/steps * 32768.0f));
-
-  short x_1_mod_1 = x_1_short | z_short_1;
-  short x_1_mod_2 = x_1_short | z_short_2;
-  short x_1_mod = x_1_mod_1 + (x_1_mod_2 - x_1_mod_1) * z_fractional;
-
-  short x_2_mod_1 = x_2_short | z_short_1;
-  short x_2_mod_2 = x_2_short | z_short_2;
-  short x_2_mod = x_2_mod_1 + (x_2_mod_2 - x_2_mod_1) * z_fractional;
-
-  *y_2 = static_cast<float>(x_1_mod) / 32768.0f;
-
-  float ops[4];
-  ops[0] = static_cast<float>(x_1_mod + x_2_mod) / 32768.0f;
-  ops[1] = static_cast<float>(x_1_mod | x_2_mod) / 32768.0f;
-  ops[2] = static_cast<float>(x_1_mod ^ x_2_mod) / 32768.0f;
-  ops[3] = static_cast<float>(x_1_mod << (x_2_mod >> 12)) / 32768.0f;
-  return Interpolate(ops, p_2, 3.0f);
-}
-
-/* static */
-template<>
 inline float Modulator::Xmod<ALGORITHM_COMPARATOR>(
     float modulator, float carrier, float parameter) {
   float x = parameter * 2.995f;
@@ -1151,71 +1099,29 @@ inline float Modulator::Xmod<ALGORITHM_COMPARATOR>(
 
 /* static */
 template<>
-inline float Modulator::Xmod<ALGORITHM_COMPARATOR8>(
-    float modulator, float carrier, float parameter) {
-  float x = parameter * 6.995f;
-  MAKE_INTEGRAL_FRACTIONAL(x);
-  float y_1, y_2;
-
-  if (x_integral == 0) {
-    y_1 = modulator + carrier;
-    y_2 = modulator < carrier ? modulator : carrier;
-  } else if (x_integral == 1) {
-    y_1 = modulator < carrier ? modulator : carrier;
-    y_2 = (modulator < carrier ? fabs(carrier) : fabs(modulator)) * 2.0f - 1.0f;
-  } else if (x_integral == 2) {
-    y_1 = (modulator < carrier ? fabs(carrier) : fabs(modulator)) * 2.0f - 1.0f;
-    y_2 = modulator < carrier ? -carrier : modulator;
-  } else if (x_integral == 3) {
-    y_1 = modulator < carrier ? -carrier : modulator;
-    y_2 = fabs(modulator) > fabs(carrier) ? modulator : carrier;
-  } else if (x_integral == 4) {
-    y_1 = fabs(modulator) > fabs(carrier) ? modulator : carrier;
-    y_2 = fabs(modulator) > fabs(carrier)
-      ? fabs(modulator)
-      : -fabs(carrier);
-  } else if (x_integral == 5) {
-    y_1 = fabs(modulator) > fabs(carrier)
-      ? fabs(modulator)
-      : -fabs(carrier);
-    y_2 = carrier > 0.05f ? carrier : modulator;
-  } else {
-    y_1 = carrier > 0.05f ? carrier : modulator;
-    y_2 = carrier > 0.05f ? carrier : -fabs(modulator);
-  }
-
-  return y_1 + (y_2 - y_1) * x_fractional;
-}
-
-/* static */
-template<>
-inline float Modulator::Xmod<ALGORITHM_COMPARATOR_CHEBYSCHEV>(
-    float x_1, float x_2, float p_1, float p_2) {
-
-  float x = Xmod<ALGORITHM_COMPARATOR8>(x_1, x_2, p_1);
-  x = Mod<ALGORITHM_CHEBYSCHEV>(x, p_2);
-  return 0.8f * x;
-}
-
-/* static */
-template<>
 inline float Modulator::Xmod<ALGORITHM_CHEBYSCHEV>(
     float x_1, float x_2, float p_1, float p_2) {
 
   float x = x_1 + x_2;
 
-  const float degree = 16.0f;
+  const float att = 1.0f;
+  const float rel = 0.000001f;
 
-  x *= p_2 * 2.0f;
+  static float envelope_;
 
-  if (x < -1.0f) x = -1.0f;
-  else if (x > 1.0f) x = 1.0f;
+  float error = fabs(x) - envelope_;
+  envelope_ += (error > 0.0f ? att : rel) * error;
+
+  const float degree = 14.0f;
+
+  x /= envelope_;
+  x *= p_2;
 
   float n = p_1 * degree;
 
   float tn1 = x;
   float tn = 2.0f * x * x - 1;
-  while (n > 1.0f) {
+  while (n > 1.0) {
     float temp = tn;
     tn = 2.0f * x * tn - tn1;
     tn1 = temp;
@@ -1224,7 +1130,8 @@ inline float Modulator::Xmod<ALGORITHM_CHEBYSCHEV>(
 
   x = tn1 + (tn - tn1) * n;
   x /= p_2;
-  x *= 0.5f;
+
+  x *= envelope_;
 
   return x;
 }

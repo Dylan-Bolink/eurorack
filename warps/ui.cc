@@ -94,17 +94,23 @@ void Ui::Init(Settings* settings, CvScaler* cv_scaler, Modulator* modulator) {
   modulator_ = modulator;
   
   modulator_->set_feature_mode(static_cast<FeatureMode>(settings_->state().feature_mode));
+  modulator_->set_alt_feature_mode(settings_->state().alt_feature_mode);
+  alt_feature_mode_ = modulator_->alt_feature_mode();
   feature_mode_ = modulator_->feature_mode();
   carrier_shape_ = settings_->state().carrier_shape;
   UpdateSettings();
 
   last_algo_pot_ = 0.0f;
+  last_mod_pot_ = 0.0f;
   feature_mode_changed_ = false;
+  alternate_mode_changed_ = false;
 }
 
 void Ui::UpdateSettings() {
   modulator_->set_feature_mode(static_cast<FeatureMode>(feature_mode_));
+  modulator_->set_alt_feature_mode(alt_feature_mode_);
   settings_->mutable_state()->feature_mode = feature_mode_;
+  settings_->mutable_state()->alt_feature_mode = alt_feature_mode_;
   modulator_->mutable_parameters()->carrier_shape = carrier_shape_;
   settings_->mutable_state()->carrier_shape = carrier_shape_;
 }
@@ -178,20 +184,36 @@ void Ui::Poll() {
     case UI_MODE_FEATURE_SWITCH:
       {
         const Parameters& p = modulator_->parameters();
-	if (p.raw_algorithm_pot >= last_algo_pot_ + kAlgoChangeThreshold ||
-	    p.raw_algorithm_pot <= last_algo_pot_ - kAlgoChangeThreshold) {
-	  feature_mode_changed_ = true;
-	}
+        if (p.raw_algorithm_pot >= last_algo_pot_ + kAlgoChangeThreshold ||
+            p.raw_algorithm_pot <= last_algo_pot_ - kAlgoChangeThreshold) {
+          feature_mode_changed_ = true;
+        }
 
-	if (feature_mode_changed_) {
-	  feature_mode_ = static_cast<uint8_t>(p.raw_algorithm_pot * 8.0f + 0.5f);
-	  int8_t ramp = system_clock.milliseconds() & 127;
-	  uint8_t tri = (system_clock.milliseconds() & 255) < 128 ?
-	    127 + ramp : 255 - ramp;
-	  leds_.set_main((feature_mode_palette_[feature_mode_][0] * tri) >> 8,
-			 (feature_mode_palette_[feature_mode_][1] * tri) >> 8,
-			 (feature_mode_palette_[feature_mode_][2] * tri) >> 8);
-	}
+        if (p.raw_modulation_pot >= last_mod_pot_ + 0.02f ||
+            p.raw_modulation_pot <= last_mod_pot_ - 0.02f) {
+          alternate_mode_changed_ = true;
+        }
+
+        if (feature_mode_changed_) {
+          feature_mode_ = static_cast<uint8_t>(p.raw_algorithm_pot * 8.0f + 0.5f);
+          int8_t ramp = system_clock.milliseconds() & 127;
+          uint8_t tri = (system_clock.milliseconds() & 255) < 128 ?
+            127 + ramp : 255 - ramp;
+          leds_.set_main((feature_mode_palette_[feature_mode_][0] * tri) >> 8,
+            (feature_mode_palette_[feature_mode_][1] * tri) >> 8,
+            (feature_mode_palette_[feature_mode_][2] * tri) >> 8);
+        }
+
+        if (alternate_mode_changed_) {
+          alt_feature_mode_ = p.raw_modulation > 0.5f;
+          int8_t ramp = system_clock.milliseconds() & 127;
+          uint8_t tri = (system_clock.milliseconds() & 255) < 128 ?
+            127 + ramp : 255 - ramp;
+          leds_.set_main((feature_mode_palette_[feature_mode_][0] * tri) >> 8,
+            (feature_mode_palette_[feature_mode_][1] * tri) >> 8,
+            (feature_mode_palette_[feature_mode_][2] * tri) >> 8);
+          leds_.set_osc(!alt_feature_mode_, alt_feature_mode_);
+        }
       }
       break;
       
@@ -253,6 +275,7 @@ void Ui::OnSwitchPressed(const Event& e) {
           break;
         case UI_MODE_NORMAL:
           last_algo_pot_ = modulator_->parameters().raw_algorithm_pot;
+          last_mod_pot_ = modulator_->parameters().raw_modulation_pot;
           mode_ = UI_MODE_FEATURE_SWITCH;
           break;
         default:
@@ -285,8 +308,9 @@ void Ui::OnSwitchReleased(const Event& e) {
          CalibrateC3();
        } else {
          mode_ = UI_MODE_NORMAL;
-         if (feature_mode_changed_) {
+         if (feature_mode_changed_ || alternate_mode_changed_) {
            feature_mode_changed_ = false;
+           alternate_mode_changed_ = false;
          }
          else {
            carrier_shape_ = (carrier_shape_ + 1) & 3;

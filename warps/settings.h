@@ -44,6 +44,7 @@ struct CalibrationData {
 struct State {
   uint8_t carrier_shape;
   uint8_t feature_mode;
+  bool alt_feature_mode;
 };
 
 struct SettingsData {
