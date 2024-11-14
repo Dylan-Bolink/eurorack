@@ -123,14 +123,13 @@ void Ui::Poll() {
   if (switches_.pressed(0) && press_time_) {
     if (!feature_mode_changed_) {
       if (cv_scaler_->ready_for_calibration() && (system_clock.milliseconds() - press_time_) >= 7800) {
-        queue_.AddEvent(CONTROL_SWITCH, 1, 0);
-        press_time_ = 0;
-      }
-      else if ((system_clock.milliseconds() - press_time_) >= 12600) {
-        queue_.AddEvent(CONTROL_SWITCH, 2, 0);
-        press_time_ = 0;
-      }
-    }
+          queue_.AddEvent(CONTROL_SWITCH, 1, 0);
+          press_time_ = 0;
+       } else if ((system_clock.milliseconds() - press_time_) >= 12600) {
+         queue_.AddEvent(CONTROL_SWITCH, 2, 0);
+         press_time_ = 0;
+       }
+     }
   }
   
   if (switches_.released(0) && press_time_) {

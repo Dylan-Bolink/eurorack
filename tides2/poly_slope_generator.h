@@ -346,7 +346,31 @@ class PolySlopeGenerator {
                   shape_table,
                   shape_fractional),
               fold);
-        }
+      } else if (output_mode == OUTPUT_MODE_STEREO) {
+        //OUTPUT STEREO MODE HERE
+        const float phase = ramp_generator_.phase(0);
+        const float frequency = ramp_generator_.frequency(0);
+        const float raw = ramp_shaper_[0].Slope<ramp_mode, range>(phase, 0.0f, frequency, pw);
+
+        // Process raw signal and fold for each channel, replacing specific controls with shift.
+        const float shape_output = ramp_waveshaper_[0].Shape<ramp_mode>(raw, shape_table, shape_fractional);
+
+        // Output 1 (Original, uses shape knob)
+        out[i].channel[0] = Fold<ramp_mode>(shape_output, fold);
+
+        // Output 2 (Shape replaced by Shift)
+        const float shift_shaped = ramp_waveshaper_[0].Shape<ramp_mode>(raw, shape_table, shift);
+        out[i].channel[1] = Fold<ramp_mode>(shift_shaped, fold);
+
+        // Output 3 (Slope replaced by Shift)
+        const float shifted_slope = ramp_shaper_[0].Slope<ramp_mode, range>(phase, 0.0f, frequency, shift);
+        const float shifted_slope_shaped = ramp_waveshaper_[0].Shape<ramp_mode>(shifted_slope, shape_table, shape_fractional);
+        out[i].channel[2] = Fold<ramp_mode>(shifted_slope_shaped, fold);
+
+        // Output 4 (Smoothness replaced by Shift)
+        const float smooth_shifted = ramp_shaper_[0].Slope<ramp_mode, range>(phase, 0.0f, frequency, pw);
+        const float smooth_shifted_shaped = ramp_waveshaper_[0].Shape<ramp_mode>(smooth_shifted, shape_table, shift);
+        out[i].channel[3] = Fold<ramp_mode>(smooth_shifted_shaped, fold);
       }
     }
   }
