@@ -164,7 +164,7 @@ void TestEasterEgg() {
   
   Modulator modulator;
   modulator.Init(kSampleRate);
-  modulator.set_feature_mode(FEATURE_MODE_CHEBYSCHEV);
+  modulator.set_feature_mode(FEATURE_MODE_LOSSY_MIXER);
   
   Parameters* p = modulator.mutable_parameters();
   

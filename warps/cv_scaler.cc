@@ -154,6 +154,10 @@ void CvScaler::Read(Parameters* p) {
   float level_2_pot = lp_state_[ADC_LEVEL_2_POT];
   float level_2_cv = calibration_data_->offset[ADC_LEVEL_2_CV] - lp_state_[ADC_LEVEL_2_CV];
   float level_2_value = level_2_pot * level_2_cv * 1.6f;
+
+  p->raw_dry_wet_pot = level_2_pot;
+  p->raw_dry_wet_cv = level_2_cv * 1.6f;
+  
   CONSTRAIN(level_2_value, 0.0f, 1.0f);
   p->raw_level[1] = level_2_value;
 

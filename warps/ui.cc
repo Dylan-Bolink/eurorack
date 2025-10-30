@@ -82,6 +82,23 @@ const uint8_t Ui::freq_shifter_palette_[10][3] = {
   { 255, 0, 0 },
 };
 
+static const uint8_t delay_palette[13][3] = {
+  {255, 0, 0},    // -1.0f   (Red)
+  {255, 64, 0},   // -0.75f
+  {255, 128, 0},  // -0.5f   (Orange)
+  {255, 192, 0},  // -0.25f
+  {255, 255, 0},  // -0.125f (Yellow)
+  {128, 255, 0},  // -0.0625f
+  {0, 255, 0},    // 0.003125f (Green - Center)
+  {0, 255, 128},  // 0.0625f
+  {0, 255, 255},  // 0.125f  (Cyan)
+  {0, 192, 255},  // 0.25f
+  {0, 128, 255},  // 0.5f    (Blue)
+  {128, 0, 255},  // 0.75f
+  {255, 0, 255}   // 1.0f    (Magenta)
+};
+const int num_steps = 13; 
+
 const float kAlgoChangeThreshold = 0.01f;
   
 void Ui::Init(Settings* settings, CvScaler* cv_scaler, Modulator* modulator) {
@@ -148,27 +165,90 @@ void Ui::Poll() {
         const uint8_t (*palette)[3];
 
         switch (modulator_->feature_mode()) {
-        case FEATURE_MODE_META:
-          zone = p.modulation_algorithm;
-          palette = palette_;
-          break;
+          case FEATURE_MODE_META:
+            {
+              zone = p.modulation_algorithm;
+              palette = palette_; 
+              zone *= 8.0f;
+              MAKE_INTEGRAL_FRACTIONAL(zone);
+              int32_t zone_fractional_i = static_cast<int32_t>(
+                  zone_fractional * 256.0f);
+              for (int32_t i = 0; i < 3; ++i) {
+                int32_t a = palette[zone_integral][i];
+                int32_t b = palette[zone_integral + 1][i];
+                rgb[i] = a + ((b - a) * zone_fractional_i >> 8);
+              }
+              leds_.set_main(rgb[0], rgb[1], rgb[2]);
+            }
+            break;
+          
+          case FEATURE_MODE_LOCKED_DELAY:
+            {
+              float knob = p.raw_algorithm;
+              int step_index = static_cast<int>(knob * 12 + 0.5f);
+              CONSTRAIN(step_index, 0, 12);
 
-        default:
-          zone = p.raw_algorithm;
-          palette = freq_shifter_palette_;
-          break;
-        }
+              rgb[0] = delay_palette[step_index][0];
+              rgb[1] = delay_palette[step_index][1];
+              rgb[2] = delay_palette[step_index][2];
 
-        zone *= 8.0f;
-        MAKE_INTEGRAL_FRACTIONAL(zone);
-        int32_t zone_fractional_i = static_cast<int32_t>(
-            zone_fractional * 256.0f);
-        for (int32_t i = 0; i < 3; ++i) {
-          int32_t a = palette[zone_integral][i];
-          int32_t b = palette[zone_integral + 1][i];
-          rgb[i] = a + ((b - a) * zone_fractional_i >> 8);
+              leds_.set_main(rgb[0], rgb[1], rgb[2]);
+            }
+            break;
+          case FEATURE_MODE_CRUSH_MIXER:
+          case FEATURE_MODE_CASSETTE_MIXER:
+          case FEATURE_MODE_LOSSY_MIXER:
+          case FEATURE_MODE_DELAY:
+            { // Use braces for local scope
+              float knob = p.raw_algorithm;
+              // Define Red (More saturated Red)
+              const float r_start = 255.0f; // Increased Red
+              const float g_start = 10.0f;  // Decreased Green
+              const float b_start = 10.0f;  // Slightly adjusted Blue
+
+              // Define Turquoise (More Greenish Turquoise)
+              const float r_end = 24.0f;   // Kept Red low
+              const float g_end = 215.0f; // Increased Green
+              const float b_end = 90.0f; // Decreased Blue slightly
+
+              rgb[0] = static_cast<uint8_t>(r_start + (r_end - r_start) * knob);
+              rgb[1] = static_cast<uint8_t>(g_start + (g_end - g_start) * knob);
+              rgb[2] = static_cast<uint8_t>(b_start + (b_end - b_start) * knob);
+
+              leds_.set_main(rgb[0], rgb[1], rgb[2]);
+            }
+            break;
+
+          default:
+            {
+              zone = p.raw_algorithm;
+              palette = freq_shifter_palette_;
+              zone *= 8.0f;
+              MAKE_INTEGRAL_FRACTIONAL(zone);
+
+              int32_t zone_fractional_i = static_cast<int32_t>(
+                  zone_fractional * 256.0f);
+
+              for (int32_t i = 0; i < 3; ++i) {
+                int32_t a = palette[zone_integral][i];
+                 // Ensure we don't read past the end of the palette
+                int32_t b = palette[min(zone_integral + 1, static_cast<int32_t>(9))][i];
+                rgb[i] = a + ((b - a) * zone_fractional_i >> 8);
+              }
+              leds_.set_main(rgb[0], rgb[1], rgb[2]);
+            }
+            break;
         }
-        leds_.set_main(rgb[0], rgb[1], rgb[2]);
+        // zone *= 8.0f;
+        // MAKE_INTEGRAL_FRACTIONAL(zone);
+        // int32_t zone_fractional_i = static_cast<int32_t>(
+        //     zone_fractional * 256.0f);
+        // for (int32_t i = 0; i < 3; ++i) {
+        //   int32_t a = palette[zone_integral][i];
+        //   int32_t b = palette[zone_integral + 1][i];
+        //   rgb[i] = a + ((b - a) * zone_fractional_i >> 8);
+        // }
+        // leds_.set_main(rgb[0], rgb[1], rgb[2]);
         leds_.set_osc(
             carrier_shape_ >= 2 ? 255 : 0,
             carrier_shape_ > 0 && carrier_shape_ <= 2 ? 255 : 0);

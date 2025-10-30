@@ -42,13 +42,13 @@ enum OscillatorShape {
 };
 
 enum FeatureMode {
-  FEATURE_MODE_DOPPLER,
-  FEATURE_MODE_FOLD,
-  FEATURE_MODE_CHEBYSCHEV,
+  FEATURE_MODE_CRUSH_MIXER,
+  FEATURE_MODE_CASSETTE_MIXER,
+  FEATURE_MODE_LOSSY_MIXER,
   FEATURE_MODE_FREQUENCY_SHIFTER,
   FEATURE_MODE_BITCRUSHER,
   FEATURE_MODE_COMPARATOR,
-  FEATURE_MODE_VOCODER,
+  FEATURE_MODE_LOCKED_DELAY,
   FEATURE_MODE_DELAY,
   FEATURE_MODE_META,
 };
@@ -60,6 +60,8 @@ struct Parameters {
   
   // Raw parameters.
   float raw_level[2];
+  float raw_dry_wet_pot;
+  float raw_dry_wet_cv;
   float raw_algorithm_pot;
   float raw_algorithm_cv;
   float raw_algorithm;

@@ -42,11 +42,11 @@ namespace warps {
 
 typedef uint8_t ResourceId;
 
-extern const float* filter_bank_table[];
+extern const float* const filter_bank_table[];
 
-extern const float* lookup_table_table[];
+extern const float* const lookup_table_table[];
 
-extern const float* wav_table[];
+extern const float* const wav_table[];
 
 extern const float fb__87_8000[];
 extern const float fb_110_8000[];

@@ -129,6 +129,7 @@ enum XmodAlgorithm {
   ALGORITHM_COMPARATOR_CHEBYSCHEV,
   ALGORITHM_BITCRUSHER,
   ALGORITHM_NOP,
+  ALGORITHM_SIMPLE_BITCRUSHER,
   ALGORITHM_LAST
 };
 
@@ -152,10 +153,13 @@ class Modulator {
   template<XmodAlgorithm algorithm>
   void Process1(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessFreqShifter(ShortFrame* input, ShortFrame* output, size_t size);
-  void ProcessVocoder(ShortFrame* input, ShortFrame* output, size_t size);
+  // void ProcessVocoder(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessBitcrusher(ShortFrame* input, ShortFrame* output, size_t size);
-  void ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size);
-  void ProcessDoppler(ShortFrame* input, ShortFrame* output, size_t size);
+  void ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size, bool locked_frequency);
+  // void ProcessDoppler(ShortFrame* input, ShortFrame* output, size_t size);
+  void ProcessCrushMixer(ShortFrame* input, ShortFrame* output, size_t size);
+  void ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size_t size);
+  void ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessMeta(ShortFrame* input, ShortFrame* output, size_t size);
   inline Parameters* mutable_parameters() { return &parameters_; }
   inline const Parameters& parameters() { return parameters_; }
@@ -303,7 +307,6 @@ class Modulator {
 
   Oscillator xmod_oscillator_;
   Oscillator vocoder_oscillator_;
-  Oscillator square_oscillator_;
   QuadratureOscillator quadrature_oscillator_;
   SampleRateConverter<SRC_UP, kOversampling, 48> src_up_[2];
   SampleRateConverter<SRC_DOWN, kOversampling, 48> src_down_;
@@ -314,10 +317,20 @@ class Modulator {
 
   stmlib::OnePole filter_[4];
 
-  /* everything that follows will be used as delay buffer */
-  ShortFrame delay_buffer_[8192+4096];  
+  // Tape effect delay buffer
+  static const int kSharedDelaySize = 12288;
+  int32_t shared_write_pos_;
+  stmlib::OnePole tape_lp_l_; // Low-pass filter for tape effect (left)
+  stmlib::OnePole tape_lp_r_; // Low-pass filter for tape effect (right)
+
+  stmlib::OnePole de_emphasis_lp_l_;
+  stmlib::OnePole de_emphasis_lp_r_;
+
+  stmlib::Svf lossy_bpf_l_;
+  stmlib::Svf lossy_bpf_r_;
+
+  ShortFrame delay_buffer_[8192+4096];
   float internal_modulation_[kMaxBlockSize];
-  float non_modulation_[10];
   float buffer_[3][kMaxBlockSize];
   float src_buffer_[2][kMaxBlockSize * kOversampling];
   float feedback_sample_;
