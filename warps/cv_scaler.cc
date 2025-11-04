@@ -157,7 +157,7 @@ void CvScaler::Read(Parameters* p) {
 
   p->raw_dry_wet_pot = level_2_pot;
   p->raw_dry_wet_cv = level_2_cv * 1.6f;
-  
+
   CONSTRAIN(level_2_value, 0.0f, 1.0f);
   p->raw_level[1] = level_2_value;
 
@@ -190,6 +190,8 @@ void CvScaler::Read(Parameters* p) {
   }
   
   adc_.Convert();
+
+  p->level_2_cv_patched = !normalization_detector_[1].normalized();
 }
 
 }  // namespace warps

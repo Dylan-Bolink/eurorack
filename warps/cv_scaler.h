@@ -165,6 +165,8 @@ class CvScaler {
   }
   
   float UnwrapPot(float x) const;
+
+  bool is_patched(int channel) const { return !normalization_detector_[channel].normalized(); }
   
  private:
   void DetectNormalization();

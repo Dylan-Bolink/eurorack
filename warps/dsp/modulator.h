@@ -155,8 +155,8 @@ class Modulator {
   void ProcessFreqShifter(ShortFrame* input, ShortFrame* output, size_t size);
   // void ProcessVocoder(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessBitcrusher(ShortFrame* input, ShortFrame* output, size_t size);
-  void ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size, bool locked_frequency);
-  // void ProcessDoppler(ShortFrame* input, ShortFrame* output, size_t size);
+  void ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size);
+  void ProcessDoppler(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessCrushMixer(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t size);
@@ -315,16 +315,13 @@ class Modulator {
   Vocoder vocoder_;
   QuadratureTransform quadrature_transform_[2];  
 
-  stmlib::OnePole filter_[4];
+  stmlib::OnePole filter_[8];
 
   // Tape effect delay buffer
   static const int kSharedDelaySize = 12288;
   int32_t shared_write_pos_;
   stmlib::OnePole tape_lp_l_; // Low-pass filter for tape effect (left)
   stmlib::OnePole tape_lp_r_; // Low-pass filter for tape effect (right)
-
-  stmlib::OnePole de_emphasis_lp_l_;
-  stmlib::OnePole de_emphasis_lp_r_;
 
   stmlib::Svf lossy_bpf_l_;
   stmlib::Svf lossy_bpf_r_;

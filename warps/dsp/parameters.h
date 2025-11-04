@@ -48,7 +48,7 @@ enum FeatureMode {
   FEATURE_MODE_FREQUENCY_SHIFTER,
   FEATURE_MODE_BITCRUSHER,
   FEATURE_MODE_COMPARATOR,
-  FEATURE_MODE_LOCKED_DELAY,
+  FEATURE_MODE_DOPPLER,
   FEATURE_MODE_DELAY,
   FEATURE_MODE_META,
 };
@@ -66,6 +66,8 @@ struct Parameters {
   float raw_algorithm_cv;
   float raw_algorithm;
   float note;
+
+  bool level_2_cv_patched;
 
   int32_t carrier_shape;  // 0 = external
   

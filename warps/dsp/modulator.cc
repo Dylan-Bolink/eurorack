@@ -78,6 +78,10 @@ void Modulator::Init(float sample_rate) {
   filter_[1].Init();
   filter_[2].Init();
   filter_[3].Init();
+  filter_[4].Init();
+  filter_[5].Init();
+  filter_[6].Init();
+  filter_[7].Init();
 
   // Tape effect filters
   shared_write_pos_ = 0;
@@ -91,9 +95,6 @@ void Modulator::Init(float sample_rate) {
 
   lossy_bpf_l_.Init();
   lossy_bpf_r_.Init();
-
-  de_emphasis_lp_l_.Init();
-  de_emphasis_lp_r_.Init();
 }
 
 void Modulator::ProcessFreqShifter(
@@ -583,7 +584,7 @@ void Modulator::ProcessBitcrusher(ShortFrame* input, ShortFrame* output, size_t 
 
 }
 
-void Modulator::ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size, bool locked_frequency) {
+void Modulator::ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size) {
   ShortFrame *buffer = delay_buffer_;
 
   static FloatFrame feedback_sample;
@@ -615,6 +616,8 @@ void Modulator::ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size,
     feedback = 1.0f; // Force feedback to 100%
     feedback_increment = 0.0f;
   }
+
+  bool locked_frequency = parameters_.level_2_cv_patched;
 
   if(locked_frequency) {
       static const float speeds[] = { 
@@ -800,12 +803,14 @@ void Modulator::ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size,
     wet.l /= 32768.0f;
     wet.r /= 32768.0f;
 
-    // attenuate output at low sample rate to mask stupid
-    // discontinuity bug
-    float gain = sample_rate / 0.01f;
-    CONSTRAIN(gain, 0.0f, 1.0f);
-    wet.l *= gain * gain;
-    wet.r *= gain * gain;
+    if (!freeze_active) {
+      // attenuate output at low sample rate to mask stupid
+      // discontinuity bug
+      float gain = sample_rate / 0.01f;
+      CONSTRAIN(gain, 0.0f, 1.0f);
+      wet.l *= gain * gain;
+      wet.r *= gain * gain;
+    }
 
     feedback_sample = wet;
 
@@ -838,114 +843,114 @@ void Modulator::ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size,
   previous_parameters_ = parameters_;
 }
 
-// void Modulator::ProcessDoppler(ShortFrame* input, ShortFrame* output, size_t size) {
-//   ShortFrame *buffer = delay_buffer_;
+void Modulator::ProcessDoppler(ShortFrame* input, ShortFrame* output, size_t size) {
+  ShortFrame *buffer = delay_buffer_;
 
-//   static size_t cursor = 0;
-//   static float lfo_phase = 0.0f;
-//   static float distance = 1.0f;
-//   static float angle = 1.0f;
+  static size_t cursor = 0;
+  static float lfo_phase = 0.0f;
+  static float distance = 1.0f;
+  static float angle = 1.0f;
 
-//   float x = previous_parameters_.raw_algorithm * 2.0f - 1.0f;
-//   float x_end = parameters_.raw_algorithm * 2.0f - 1.0f;
+  float x = previous_parameters_.raw_algorithm * 2.0f - 1.0f;
+  float x_end = parameters_.raw_algorithm * 2.0f - 1.0f;
 
-//   float y = previous_parameters_.modulation_parameter * 2.0f;
-//   float y_end = parameters_.modulation_parameter * 2.0f;
+  float y = previous_parameters_.modulation_parameter * 2.0f;
+  float y_end = parameters_.modulation_parameter * 2.0f;
 
-//   float lfo_freq = parameters_.channel_drive[0]
-//     * parameters_.channel_drive[0]
-//     * 50.0f;
-//   float lfo_amplitude = parameters_.channel_drive[1];
+  float lfo_freq = parameters_.channel_drive[0]
+    * parameters_.channel_drive[0]
+    * 50.0f;
+  float lfo_amplitude = parameters_.channel_drive[1];
 
-//   float step = 1.0f / static_cast<float>(size);
-//   float x_increment = (x_end - x) * step;
-//   float y_increment = (y_end - y) * step;
+  float step = 1.0f / static_cast<float>(size);
+  float x_increment = (x_end - x) * step;
+  float y_increment = (y_end - y) * step;
 
-//   int8_t shape = parameters_.carrier_shape;
+  int8_t shape = parameters_.carrier_shape;
 
-//   float atten_factor =
-//     shape == 0 ? 0.5f :
-//     shape == 1 ? 4.0f :
-//     shape == 2 ? 8.0f :
-//     shape == 3 ? 15.0f : 0;
+  float atten_factor =
+    shape == 0 ? 0.5f :
+    shape == 1 ? 4.0f :
+    shape == 2 ? 8.0f :
+    shape == 3 ? 15.0f : 0;
 
-//   float room_size =
-//     shape == 0 ? 100 :
-//     shape == 1 ? (DELAY_SIZE - 1) / 10.0f :
-//     shape == 2 ? (DELAY_SIZE - 1) / 5.0f :
-//     shape == 3 ? (DELAY_SIZE - 1) / 2.0f : 0;
+  float room_size =
+    shape == 0 ? 100 :
+    shape == 1 ? (DELAY_SIZE - 1) / 10.0f :
+    shape == 2 ? (DELAY_SIZE - 1) / 5.0f :
+    shape == 3 ? (DELAY_SIZE - 1) / 2.0f : 0;
 
-//   while (size--) {
+  while (size--) {
 
-//     // write input to buffer
-//     buffer[cursor].l = input->l;
-//     buffer[cursor].r = input->r;
+    // write input to buffer
+    buffer[cursor].l = input->l;
+    buffer[cursor].r = input->r;
 
-//     // LFOs
-//     float sin = Interpolate(lut_sin, lfo_phase, 1024.0f);
-//     float cos = Interpolate(lut_sin + 256, lfo_phase, 1024.0f);
+    // LFOs
+    float sin = Interpolate(lut_sin, lfo_phase, 1024.0f);
+    float cos = Interpolate(lut_sin + 256, lfo_phase, 1024.0f);
 
-//     float x_lfo = x + sin * lfo_amplitude + 0.05f; // offset avoids discontinuity at 0
-//     float y_lfo = y + cos  * lfo_amplitude;
-//     CONSTRAIN(x_lfo, -1.0f, 1.0f);
-//     CONSTRAIN(y_lfo, -1.0f, 2.0f);
+    float x_lfo = x + sin * lfo_amplitude + 0.05f; // offset avoids discontinuity at 0
+    float y_lfo = y + cos  * lfo_amplitude;
+    CONSTRAIN(x_lfo, -1.0f, 1.0f);
+    CONSTRAIN(y_lfo, -1.0f, 2.0f);
 
-//     // compute angular coordinates
-//     float di = sqrtf(x_lfo * x_lfo + y_lfo * y_lfo); // 0..sqrt(5)
-//     float an = Interpolate(lut_arcsin, (x_lfo/di + 1.0f) * 0.5f, 256.0f);
-//     di /= 2.237;		// sqrt(5)
+    // compute angular coordinates
+    float di = sqrtf(x_lfo * x_lfo + y_lfo * y_lfo); // 0..sqrt(5)
+    float an = Interpolate(lut_arcsin, (x_lfo/di + 1.0f) * 0.5f, 256.0f);
+    di /= 2.237;		// sqrt(5)
 
-//     ONE_POLE(distance, di, 0.001f);
-//     ONE_POLE(angle, an, 0.001f);
+    ONE_POLE(distance, di, 0.001f);
+    ONE_POLE(angle, an, 0.001f);
 
-//     // compute binaural delay
-//     float binaural_delay = angle * (96000.0f * 0.0015f); // -1.5ms..1.5ms
-//     float delay_l = distance * room_size + (angle > 0 ? binaural_delay : 0);
-//     float delay_r = distance * room_size + (angle < 0 ? -binaural_delay : 0);
+    // compute binaural delay
+    float binaural_delay = angle * (96000.0f * 0.0015f); // -1.5ms..1.5ms
+    float delay_l = distance * room_size + (angle > 0 ? binaural_delay : 0);
+    float delay_r = distance * room_size + (angle < 0 ? -binaural_delay : 0);
 
-//     // linear delay interpolation
-//     MAKE_INTEGRAL_FRACTIONAL(delay_l);
-//     MAKE_INTEGRAL_FRACTIONAL(delay_r);
+    // linear delay interpolation
+    MAKE_INTEGRAL_FRACTIONAL(delay_l);
+    MAKE_INTEGRAL_FRACTIONAL(delay_r);
 
-//     int16_t index_l = cursor - delay_l_integral;
-//     if (index_l < 0) index_l += DELAY_SIZE;
-//     int16_t index_r = cursor - delay_r_integral;
-//     if (index_r < 0) index_r += DELAY_SIZE;
+    int16_t index_l = cursor - delay_l_integral;
+    if (index_l < 0) index_l += DELAY_SIZE;
+    int16_t index_r = cursor - delay_r_integral;
+    if (index_r < 0) index_r += DELAY_SIZE;
 
-//     ShortFrame a_l = buffer[index_l];
-//     ShortFrame b_l = buffer[index_l == 0 ? DELAY_SIZE - 1 : index_l - 1];
-//     ShortFrame a_r = buffer[index_r];
-//     ShortFrame b_r = buffer[index_r == 0 ? DELAY_SIZE - 1 : index_r - 1];
+    ShortFrame a_l = buffer[index_l];
+    ShortFrame b_l = buffer[index_l == 0 ? DELAY_SIZE - 1 : index_l - 1];
+    ShortFrame a_r = buffer[index_r];
+    ShortFrame b_r = buffer[index_r == 0 ? DELAY_SIZE - 1 : index_r - 1];
 
-//     short s1_l = a_l.l + (b_l.l - a_l.l) * delay_l_fractional;
-//     short s2_l = a_l.r + (b_l.r - a_l.r) * delay_l_fractional;
-//     short s1_r = a_r.l + (b_r.l - a_r.l) * delay_r_fractional;
-//     short s2_r = a_r.r + (b_r.r - a_r.r) * delay_r_fractional;
+    short s1_l = a_l.l + (b_l.l - a_l.l) * delay_l_fractional;
+    short s2_l = a_l.r + (b_l.r - a_l.r) * delay_l_fractional;
+    short s1_r = a_r.l + (b_r.l - a_r.l) * delay_r_fractional;
+    short s2_r = a_r.r + (b_r.r - a_r.r) * delay_r_fractional;
 
-//     // distance attenuation
-//     float atten = 1.0f + atten_factor * distance * distance;
-//     s1_l /= atten;
-//     s2_l /= atten;
-//     s1_r /= atten;
-//     s2_r /= atten;
+    // distance attenuation
+    float atten = 1.0f + atten_factor * distance * distance;
+    s1_l /= atten;
+    s2_l /= atten;
+    s1_r /= atten;
+    s2_r /= atten;
 
-//     float fade_in = Interpolate(lut_xfade_in, (angle + 1.0f) / 2.0f, 256.0f);
-//     float fade_out = Interpolate(lut_xfade_out, (angle + 1.0f) / 2.0f, 256.0f);
+    float fade_in = Interpolate(lut_xfade_in, (angle + 1.0f) / 2.0f, 256.0f);
+    float fade_out = Interpolate(lut_xfade_out, (angle + 1.0f) / 2.0f, 256.0f);
 
-//     output->l = s2_l * fade_in + s1_l * fade_out;
-//     output->r = s1_r * fade_in + s2_r * fade_out;
+    output->l = s2_l * fade_in + s1_l * fade_out;
+    output->r = s1_r * fade_in + s2_r * fade_out;
 
-//     x += x_increment;
-//     y += y_increment;
-//     lfo_phase += lfo_freq / 96000.0f;
-//     if (lfo_phase > 1.0f) lfo_phase--;
-//     input++;
-//     output++;
-//     cursor = (cursor + 1) % DELAY_SIZE;
-//   }
+    x += x_increment;
+    y += y_increment;
+    lfo_phase += lfo_freq / 96000.0f;
+    if (lfo_phase > 1.0f) lfo_phase--;
+    input++;
+    output++;
+    cursor = (cursor + 1) % DELAY_SIZE;
+  }
 
-//   previous_parameters_ = parameters_;
-// }
+  previous_parameters_ = parameters_;
+}
 
 void Modulator::Process(ShortFrame* input, ShortFrame* output, size_t size) {
   if (bypass_) {
@@ -979,19 +984,25 @@ void Modulator::Process(ShortFrame* input, ShortFrame* output, size_t size) {
     Process1<ALGORITHM_COMPARATOR_CHEBYSCHEV>(input, output, size);
     break;
 
-  case FEATURE_MODE_LOCKED_DELAY:
-    ProcessDelay(input, output, size, true);
-    // ProcessVocoder(input, output, size);
+  case FEATURE_MODE_DOPPLER:
+    ProcessDoppler(input, output, size);
     break;
 
   case FEATURE_MODE_DELAY:
-    ProcessDelay(input, output, size, false);
+    ProcessDelay(input, output, size);
     break;
 
   case FEATURE_MODE_META:
     ProcessMeta(input, output, size);
     break;
   }
+}
+
+inline float smoothstep(float edge0, float edge1, float x) {
+    x = (x - edge0) / (edge1 - edge0);
+    if (x < 0.0f) x = 0.0f;
+    else if (x > 1.0f) x = 1.0f;
+    return x * x * (3.0f - 2.0f * x);
 }
 
 /* static */
@@ -1285,7 +1296,6 @@ inline float Modulator::Xmod<ALGORITHM_NOP>(
 }
 
 void Modulator::ProcessCrushMixer(ShortFrame* input, ShortFrame* output, size_t size) {
-  // --- VCA & OSCILLATOR LOGIC ---
   float* in_1 = buffer_[0];
   float* in_2 = buffer_[1];
   float* aux = buffer_[2];
@@ -1332,8 +1342,8 @@ void Modulator::ProcessCrushMixer(ShortFrame* input, ShortFrame* output, size_t 
       size);
 
   while (size--) {
-    float p1 = p1_interpolator.Next();
-    float p2_raw = timbre_interpolator.Next();
+    float p1 = timbre_interpolator.Next(); // Crossfader
+    float p2_raw =  p1_interpolator.Next(); // Effect Knob
     float x = p2_raw * 2.0f - 1.0f;
     float p2_skewed = (x * x * x + 1.0f) * 0.5f;
     float timbre = (p2_skewed * 2.0f) - 1.0f;
@@ -1375,11 +1385,7 @@ void Modulator::ProcessCrushMixer(ShortFrame* input, ShortFrame* output, size_t 
       processed_B = stmlib::SoftLimit(aliased_B * drive);
     } else {
       // --- CW: Fizzly Chebyshev + Stereo Noise-Modulated Filter ---
-  
-      // --- Define the switch threshold ---
       const float stage_switch_threshold = 0.3f;
-
-      // --- Temporary variables for the processed signal ---
       float stage_processed_A = 0.0f;
       float stage_processed_B = 0.0f;
 
@@ -1476,70 +1482,95 @@ void Modulator::ProcessCrushMixer(ShortFrame* input, ShortFrame* output, size_t 
 }
 
 void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size_t size) {
-   float* in_1 = buffer_[0];
-   float* in_2 = buffer_[1];
-   float* aux = buffer_[2];
+  float* in_1 = buffer_[0];
+  float* in_2 = buffer_[1];
+  float* aux = buffer_[2];
 
-   if (!parameters_.carrier_shape) {
-     fill(&aux[0], &aux[size], 0.0f);
-   }
-   short* input_samples = &input->l;
-   for (int32_t i = parameters_.carrier_shape ? 1 : 0; i < 2; ++i) {
-       amplifier_[i].Process(
-           parameters_.channel_drive[i],
-           1.0f,
-           input_samples + i,
-           buffer_[i],
-           aux,
-           2,
-           size);
-   }
-   if (parameters_.carrier_shape) {
-     for (size_t i = 0; i < size; ++i) {
-       internal_modulation_[i] = static_cast<float>(input[i].l) / 32768.0f;
-     }
-     OscillatorShape xmod_shape = static_cast<OscillatorShape>(
-         parameters_.carrier_shape - 1);
-     xmod_oscillator_.Render(
-           xmod_shape,
-           parameters_.note,
-           internal_modulation_,
-           in_1,
-           size);
-     for (size_t i = 0; i < size; ++i) {
-       in_1[i] = in_1[i] * kXmodCarrierGain;
-     }
-   }
+  if (!parameters_.carrier_shape) {
+    fill(&aux[0], &aux[size], 0.0f);
+  }
+  short* input_samples = &input->l;
+  for (int32_t i = parameters_.carrier_shape ? 1 : 0; i < 2; ++i) {
+      amplifier_[i].Process(
+          parameters_.channel_drive[i],
+          1.0f,
+          input_samples + i,
+          buffer_[i],
+          aux,
+          2,
+          size);
+  }
+  if (parameters_.carrier_shape) {
+    for (size_t i = 0; i < size; ++i) {
+      internal_modulation_[i] = static_cast<float>(input[i].l) / 32768.0f;
+    }
+    OscillatorShape xmod_shape = static_cast<OscillatorShape>(
+        parameters_.carrier_shape - 1);
+    xmod_oscillator_.Render(
+          xmod_shape,
+          parameters_.note,
+          internal_modulation_,
+          in_1,
+          size);
+    for (size_t i = 0; i < size; ++i) {
+      in_1[i] = in_1[i] * kXmodCarrierGain;
+    }
+  }
 
-   ParameterInterpolator p1_interpolator(
-       &previous_parameters_.raw_algorithm,
-       parameters_.raw_algorithm,
-       size);
+  float p2_raw_target = parameters_.raw_algorithm; 
+  float x_target = p2_raw_target * 2.0f - 1.0f;
+  float p2_skewed_target = (x_target * x_target * x_target + 1.0f) * 0.5f;
+  float timbre_target = (p2_skewed_target * 2.0f) - 1.0f;
+  float effect_amount_target = fabs(timbre_target);
 
-   ParameterInterpolator timbre_interpolator(
-       &previous_parameters_.modulation_parameter,
-       parameters_.modulation_parameter,
-       size);
+  if (timbre_target < 0.0f) {
+      // --- SET CASSETTE FILTERS ---
+      filter_[4].set_f<stmlib::FREQUENCY_FAST>(0.4f);
+      filter_[5].set_f<stmlib::FREQUENCY_FAST>(0.4f);
+      filter_[2].set_f<stmlib::FREQUENCY_FAST>(0.25f); // Hiss filter L
+      filter_[3].set_f<stmlib::FREQUENCY_FAST>(0.25f); // Hiss filter R
+      float filter_shape_target = sqrtf(effect_amount_target);
+      float target_filter_cutoff = 0.05f + (1.0f - filter_shape_target) * 0.45f;
+      tape_lp_l_.set_f<stmlib::FREQUENCY_FAST>(target_filter_cutoff);
+      tape_lp_r_.set_f<stmlib::FREQUENCY_FAST>(target_filter_cutoff);
 
-   while (size--) {
-     float p1 = p1_interpolator.Next();
-     float p2_raw = timbre_interpolator.Next();
-     float x = p2_raw * 2.0f - 1.0f;
-     float p2_skewed = (x * x * x + 1.0f) * 0.5f;
-     float timbre = (p2_skewed * 2.0f) - 1.0f;
+  } else {
+    // --- SET VHS FILTERS ---
+    const float tilt_center_freq = 0.02f;
+    filter_[0].set_f<stmlib::FREQUENCY_FAST>(tilt_center_freq); // L-LPF
+    filter_[1].set_f<stmlib::FREQUENCY_FAST>(tilt_center_freq); // L-HPF
+    filter_[2].set_f<stmlib::FREQUENCY_FAST>(tilt_center_freq); // R-LPF
+    filter_[3].set_f<stmlib::FREQUENCY_FAST>(tilt_center_freq); // R-HPF
+  }
 
-     float x_1 = *in_1++;
-     float x_2 = *in_2++;
+  ParameterInterpolator p1_interpolator(
+      &previous_parameters_.raw_algorithm,
+      parameters_.raw_algorithm,
+      size);
 
-     float fade_in = Interpolate(lut_xfade_in, p1, 256.0f);
-     float fade_out = Interpolate(lut_xfade_out, p1, 256.0f);
+  ParameterInterpolator timbre_interpolator(
+      &previous_parameters_.modulation_parameter,
+      parameters_.modulation_parameter,
+      size);
 
-     float mix_A = x_1 * fade_out + x_2 * fade_in; // Main Mix
-     float mix_B = x_1 * fade_in + x_2 * fade_out; // Aux (Opposite) Mix
+  while (size--) {
+    float p1 = timbre_interpolator.Next(); // Crossfader
+    float p2_raw =  p1_interpolator.Next(); // Effect Knob
+    float x = p2_raw * 2.0f - 1.0f;
+    float p2_skewed = (x * x * x + 1.0f) * 0.5f;
+    float timbre = (p2_skewed * 2.0f) - 1.0f;
+
+    float x_1 = *in_1++;
+    float x_2 = *in_2++;
+
+    float fade_in = Interpolate(lut_xfade_in, p1, 256.0f);
+    float fade_out = Interpolate(lut_xfade_out, p1, 256.0f);
+
+    float mix_A = x_1 * fade_out + x_2 * fade_in; // Main Mix
+    float mix_B = x_1 * fade_in + x_2 * fade_out; // Aux (Opposite) Mix
 
     float effect_amount = fabs(timbre);
-
-    // Calculate Fast Crossfade based on absolute amount
+    
     const float xfade_threshold = 0.05f;
     float xfade_amount = 0.0f;
     if (effect_amount < xfade_threshold) {
@@ -1554,167 +1585,281 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
     float out_A = 0.0f;
     float out_B = 0.0f;
 
-   if (timbre < 0.0f) {
+    if (timbre < 0.0f) {
       // --- CCW: Cassette Emulation ---
-
-      // --- LFOs (Flutter, Wow, Random Drift) ---
-      float flutter_freq = 0.5f + effect_amount * 2.0f;
-      float wow_freq = 0.05f + effect_amount * 0.15f;
-
+      
       static float flutter_lfo_phase = 0.0f;
-      flutter_lfo_phase += flutter_freq / 96000.0f;
-      if (flutter_lfo_phase >= 1.0f) flutter_lfo_phase -= 1.0f;
-      float flutter_mod = Interpolate(lut_sin, flutter_lfo_phase, 1024.0f);
-
       static float wow_lfo_phase = 0.0f;
-      wow_lfo_phase += wow_freq / 96000.0f;
-      if (wow_lfo_phase >= 1.0f) wow_lfo_phase -= 1.0f;
-      float wow_mod = Interpolate(lut_sin, wow_lfo_phase, 1024.0f);
+      static float random_drift_lfo_phase_ = 0.0f;
+      static float random_drift_target_val_ = 0.5f;
+      static float random_drift_current_val_ = 0.5f;
+      static float hiss_envelope_ = 0.0f;
+      static uint32_t hiss_rng_state_ = 0;
+      static float allpass_z1_ = 0.0f;
 
-      static float random_drift = 0.0f;
-      ONE_POLE(random_drift, (Random::GetFloat() - 0.5f) * 0.1f, 0.0001f);
+      static float mangle_read_pos_f = 0.0f;
+      const float mangle_threshold = 0.95f;
+      float read_pos_f;
 
-      // --- Combine modulations ---
-      float mod_intensity_scale = effect_amount;
-      float total_mod = (flutter_mod * 0.2f + wow_mod * 0.8f + random_drift) * mod_intensity_scale;
+      if (effect_amount >= mangle_threshold) {
+          // --- "TAPE MANGLE" (PITCH SHIFT) ---
+        
+          float mangle_amount = (effect_amount - mangle_threshold) / (1.0f - mangle_threshold);
 
-      // --- Read from 1-sample delay for Flanger ---
-      const float kFixedTapeDelay = 1.0f;
-      float delay_offset = total_mod * 3.0f;
-      float read_pos_f = shared_write_pos_ - kFixedTapeDelay + delay_offset;
+          float read_speed;
+          if (mangle_amount < 0.7f) {
+              read_speed = 0.5f; // -1 Octave
+          } else {
+              read_speed = 0.25f; // -2 Octaves
+          }
 
-      // Wrap read position
+          // Advance the slow read head
+          mangle_read_pos_f += read_speed; 
+          
+          // Maintain a safe distance from the write head
+          float distance = (float)shared_write_pos_ - mangle_read_pos_f;
+          while (distance < 0.0f) {
+              distance += kSharedDelaySize;
+          }
+
+          const float kSafeDistance = 20.0f;
+          if (distance < kSafeDistance) {
+              //skip ahead to maintain the safe distance
+              mangle_read_pos_f = (float)shared_write_pos_ - kSafeDistance;
+          }
+          
+          read_pos_f = mangle_read_pos_f;
+
+      } else {
+          // --- ORIGINAL WOW/FLUTTER (effect_amount < 0.95) ---
+          
+          float flutter_freq = 0.5f + effect_amount * 2.0f;
+          float wow_freq = 0.1f + effect_amount * 0.15f;
+          float mod_intensity_scale = sqrtf(effect_amount);
+
+          flutter_lfo_phase += flutter_freq / 96000.0f;
+          if (flutter_lfo_phase >= 1.0f) flutter_lfo_phase -= 1.0f;
+          
+          wow_lfo_phase += wow_freq / 96000.0f;
+          if (wow_lfo_phase >= 1.0f) wow_lfo_phase -= 1.0f;
+          
+          float flutter_mod = Interpolate(lut_sin, flutter_lfo_phase, 1024.0f);
+          float wow_mod = Interpolate(lut_sin, wow_lfo_phase, 1024.0f);
+          float total_mod = (flutter_mod * (1.0f + 0.3f * wow_mod)) * mod_intensity_scale;
+
+          const float kFixedTapeDelay = 1.0f;
+          float delay_offset = total_mod * 3.0f;
+          read_pos_f = shared_write_pos_ - kFixedTapeDelay + delay_offset;
+          mangle_read_pos_f = read_pos_f;
+      }
+      
+      // --- Slow Random LFO (for Fake Stereo) ---
+      random_drift_lfo_phase_ += 0.3f / 96000.0f;
+      if (random_drift_lfo_phase_ >= 1.0f) {
+          random_drift_lfo_phase_ -= 1.0f;
+          random_drift_target_val_ = Random::GetFloat();
+      }
+      ONE_POLE(random_drift_current_val_, random_drift_target_val_, 0.00005f);
+      float slow_random_drift = (random_drift_current_val_ - 0.5f) * 0.2f;
+      
+      // --- Wrap read position ---
       while (read_pos_f < 0.0f) read_pos_f += kSharedDelaySize;
       read_pos_f = fmodf(read_pos_f, (float)kSharedDelaySize);
 
       MAKE_INTEGRAL_FRACTIONAL(read_pos_f);
 
-      // --- Read from buffer ---
+      // --- Linear Interpolation ---
       float delayed_l, delayed_r;
-      { /* Read Block - No Changes */
+      {
           int32_t index_integral = read_pos_f_integral;
-          float index_fractional = read_pos_f_fractional;
+          float t = read_pos_f_fractional;
           const float kToFloat = 1.0f / 32768.0f;
-          float xm1_l = static_cast<float>(delay_buffer_[((index_integral - 1) + kSharedDelaySize) % kSharedDelaySize].l) * kToFloat;
+
           float x0_l  = static_cast<float>(delay_buffer_[index_integral].l) * kToFloat;
           float x1_l  = static_cast<float>(delay_buffer_[((index_integral + 1) + kSharedDelaySize) % kSharedDelaySize].l) * kToFloat;
-          float x2_l  = static_cast<float>(delay_buffer_[((index_integral + 2) + kSharedDelaySize) % kSharedDelaySize].l) * kToFloat;
-          float xm1_r = static_cast<float>(delay_buffer_[((index_integral - 1) + kSharedDelaySize) % kSharedDelaySize].r) * kToFloat;
           float x0_r  = static_cast<float>(delay_buffer_[index_integral].r) * kToFloat;
           float x1_r  = static_cast<float>(delay_buffer_[((index_integral + 1) + kSharedDelaySize) % kSharedDelaySize].r) * kToFloat;
-          float x2_r  = static_cast<float>(delay_buffer_[((index_integral + 2) + kSharedDelaySize) % kSharedDelaySize].r) * kToFloat;
-          FloatFrame c = { (x1_l - xm1_l) * 0.5f, (x1_r - xm1_r) * 0.5f };
-          FloatFrame v = { (float)(x0_l - x1_l), (float)(x0_r - x1_r)};
-          FloatFrame w = { c.l + v.l, c.r + v.r };
-          FloatFrame a = { w.l + v.l + (x2_l - x0_l) * 0.5f, w.r + v.r + (x2_r - x0_r) * 0.5f };
-          FloatFrame b_neg = { w.l + a.l, w.r + a.r };
-          float t = index_fractional;
-          delayed_l = ((((a.l * t) - b_neg.l) * t + c.l) * t + x0_l);
-          delayed_r = ((((a.r * t) - b_neg.r) * t + c.r) * t + x0_r);
-      } /* End Read Block */
+
+          delayed_l = x0_l + (x1_l - x0_l) * t;
+          delayed_r = x0_r + (x1_r - x0_r) * t;
+      }
+
+      // --- FAKE STEREO ---
+      {
+          float coeff = 0.4f + slow_random_drift * 1.0f; 
+          float x_n = delayed_r;
+          float w = x_n + coeff * allpass_z1_;
+          float y_n = -coeff * w + allpass_z1_;
+
+          allpass_z1_ = w;
+          delayed_r = y_n;
+      }
+      
+      // --- Envelope Follower ---
+      float input_level = (fabs(delayed_l) + fabs(delayed_r)) * 0.5f;
+      ONE_POLE(hiss_envelope_, input_level, 0.0002f); 
 
       // --- Saturation ---
-      float drive = 1.0f + effect_amount * 1.5f; // Increased drive
-      float offset = effect_amount * 0.1f;
+      float shaped = effect_amount * effect_amount;
+      float drive = 1.0f + shaped * 4.0f;
+      float offset = shaped * 0.15f;
       float sat_l = stmlib::SoftLimit((delayed_l * drive) + offset);
       float sat_r = stmlib::SoftLimit((delayed_r * drive) + offset);
 
       // --- De-emphasis ---
-      de_emphasis_lp_l_.set_f<stmlib::FREQUENCY_FAST>(0.4f);
-      de_emphasis_lp_r_.set_f<stmlib::FREQUENCY_FAST>(0.4f);
-      sat_l = de_emphasis_lp_l_.Process<stmlib::FILTER_MODE_LOW_PASS>(sat_l);
-      sat_r = de_emphasis_lp_r_.Process<stmlib::FILTER_MODE_LOW_PASS>(sat_r);
+      sat_l = filter_[4].Process<stmlib::FILTER_MODE_LOW_PASS>(sat_l);
+      sat_r = filter_[5].Process<stmlib::FILTER_MODE_LOW_PASS>(sat_r);
 
       // --- Filtering (Tape Bandwidth) ---
-      float filter_cutoff = 0.05f + (1.0f - effect_amount) * 0.45f; // Starts bright, gets dark
-      tape_lp_l_.set_f<stmlib::FREQUENCY_FAST>(filter_cutoff);
-      tape_lp_r_.set_f<stmlib::FREQUENCY_FAST>(filter_cutoff);
-      float filtered_l = tape_lp_l_.Process<stmlib::FILTER_MODE_LOW_PASS>(sat_l);
-      float filtered_r = tape_lp_r_.Process<stmlib::FILTER_MODE_LOW_PASS>(sat_r);
+      float filtered_l = filter_[6].Process<stmlib::FILTER_MODE_LOW_PASS>(sat_l);
+      float filtered_r = filter_[7].Process<stmlib::FILTER_MODE_LOW_PASS>(sat_r);
 
-      // --- Hiss ---
+      // --- Hiss (Dynamic) ---
       const float hiss_threshold = 0.65f;
       float hiss_amount = (effect_amount > hiss_threshold) ? hiss_threshold : effect_amount;
-      float hiss = (Random::GetFloat() - 0.5f) * hiss_amount * 0.15f;
-      filter_[3].set_f<stmlib::FREQUENCY_FAST>(0.25f);
-      float hiss_filtered = filter_[3].Process<stmlib::FILTER_MODE_HIGH_PASS>(hiss);
+      float base_hiss_level = hiss_amount * 0.08f;
+      float dynamic_hiss_level = hiss_envelope_ * 2.0f * hiss_amount * 0.5f; 
+      float hiss_level = (base_hiss_level + dynamic_hiss_level);
+      hiss_rng_state_ = 1664525L * hiss_rng_state_ + 1013904223L;
+      float hiss_raw_l = static_cast<float>(hiss_rng_state_) / 4294967296.0f;
+      float hiss_l = (hiss_raw_l - 0.5f) * hiss_level;
+      hiss_rng_state_ = 1664525L * hiss_rng_state_ + 1013904223L; 
+      float hiss_raw_r = static_cast<float>(hiss_rng_state_) / 4294967296.0f;
+      float hiss_r = (hiss_raw_r - 0.5f) * hiss_level;
+      float hiss_filtered_l = filter_[3].Process<stmlib::FILTER_MODE_HIGH_PASS>(hiss_l);
+      float hiss_filtered_r = filter_[2].Process<stmlib::FILTER_MODE_HIGH_PASS>(hiss_r); 
 
-      processed_A = filtered_l + hiss_filtered;
-      processed_B = filtered_r + hiss_filtered;
-     } else {
-        // --- CW: VHS Emulation ---
-        // --- State Variables ---
-        static float dropout_check_timer = 0.1f;  // Time until next *check*
-        static float dropout_duration_timer = 0.0f; // Time *remaining* in current dropout
+      processed_A = filtered_l + hiss_filtered_l;
+      processed_B = filtered_r + hiss_filtered_r;
+    } else {
+      // --- CW: VHS Emulation ---
+      float age_mid   = smoothstep(0.3f, 0.8f, effect_amount);
+      float age_chewed = smoothstep(0.7f, 1.0f, effect_amount);
+      float dropout_base_chance;
+      float dropout_max_length;
+      float dropout_gain_min;
 
-        // --- Noise (Band-passed) ---
-        float noise = (Random::GetFloat() - 0.5f);
-        tape_lp_l_.set_f<stmlib::FREQUENCY_FAST>(0.05f); 
-        tape_lp_r_.set_f<stmlib::FREQUENCY_FAST>(0.25f); 
-        noise = tape_lp_l_.Process<stmlib::FILTER_MODE_HIGH_PASS>(noise);
-        noise = tape_lp_r_.Process<stmlib::FILTER_MODE_LOW_PASS>(noise);
+      if (effect_amount < 0.1f) { // Fresh
+          dropout_base_chance = 0.01f;
+          dropout_max_length  = 0.010f;
+          dropout_gain_min    = 0.6f;
+      } else if (effect_amount < 0.6f) { // Mid-Age
+          dropout_base_chance = 0.1f;
+          dropout_max_length  = 0.035f;
+          dropout_gain_min    = 0.4f;
+      } else { // Chewed
+          dropout_base_chance = 0.4f;
+          dropout_max_length  = 0.070f;
+          dropout_gain_min    = 0.2f;
+      }
+      
+      // --- State Variables ---
+      static float dropout_check_timer = 0.1f;
+      static float dropout_duration_timer = 0.0f;
+      static float hum_lfo_phase_ = 0.0f;
+      
+      // --- Noise Signal (Band-passed) ---
+      float input_level = (fabs(mix_A) + fabs(mix_B)) * 0.5f;
+      static float noise_agc = 0.2f;
+      ONE_POLE(noise_agc, input_level, 0.0005f);
 
-        const float noise_threshold = 0.6f;
-        float noise_amount = (effect_amount > noise_threshold) ? noise_threshold : effect_amount;
+      // “Breathing” makes noise rise when input is quiet
+      float breathing = (1.0f - noise_agc);
 
-        // --- Dropout Logic (Improved State Machine) ---
-        float dropout_gain = 1.0f;
-        float dropout_tilt_mod = 0.0f; // 0 = no dropout, 1 = force dark tilt
+      // Raw mid-band noise source
+      float noise_mid = (Random::GetFloat() - 0.5f);
+      tape_lp_l_.set_f<stmlib::FREQUENCY_FAST>(0.05f); 
+      tape_lp_r_.set_f<stmlib::FREQUENCY_FAST>(0.25f); 
+      noise_mid = tape_lp_l_.Process<stmlib::FILTER_MODE_HIGH_PASS>(noise_mid);
+      noise_mid = tape_lp_r_.Process<stmlib::FILTER_MODE_LOW_PASS>(noise_mid);
 
-        if (dropout_duration_timer > 0.0f) {
-            // --- We ARE currently dropping out ---
-            dropout_duration_timer -= 1.0f / 96000.0f;
-            dropout_gain = 0.2f;   // Don't go to full silence, just "low"
-            dropout_tilt_mod = 1.0f; // Force tilt to dark
-        } else {
-            // --- We are NOT dropping out, check if we should ---
-            dropout_check_timer -= 1.0f / 96000.0f;
-            if (dropout_check_timer <= 0.0f) {
-                float dropout_chance = effect_amount * 0.15f;
-                if (Random::GetFloat() < dropout_chance) {
-                    // Start a dropout
-                    dropout_duration_timer = 0.001f + Random::GetFloat() * 0.015f; // 1-16ms
-                }
-                // Reset check timer (check more often at high effect)
-                dropout_check_timer = 0.01f + Random::GetFloat() * (0.05f * (1.0f - effect_amount));
-            }
+      // --- VHS Snow Filtering ---
+      float low_cutoff  = 3000.0f + 2000.0f * age_mid;
+      float high_cutoff = 4000.0f + 4000.0f * age_chewed;
+
+      filter_[4].set_f<stmlib::FREQUENCY_FAST>(low_cutoff / 96000.0f);  // L-LPF
+      filter_[5].set_f<stmlib::FREQUENCY_FAST>(high_cutoff / 96000.0f); // L-HPF
+      filter_[6].set_f<stmlib::FREQUENCY_FAST>(low_cutoff / 96000.0f);  // R-LPF
+      filter_[7].set_f<stmlib::FREQUENCY_FAST>(high_cutoff / 96000.0f); // R-HPF
+
+      float low_noise_L  = filter_[4].Process<stmlib::FILTER_MODE_LOW_PASS>(noise_mid);
+      float high_noise_L = filter_[5].Process<stmlib::FILTER_MODE_HIGH_PASS>(noise_mid);
+      float low_noise_R  = filter_[6].Process<stmlib::FILTER_MODE_LOW_PASS>(noise_mid);
+      float high_noise_R = filter_[7].Process<stmlib::FILTER_MODE_HIGH_PASS>(noise_mid);
+
+      // VHS-style mixed noise
+      float vhs_snow_L =
+      low_noise_L  * (0.2f + age_mid * 0.3f)
+      + noise_mid    * (0.6f + age_chewed * 0.3f)
+      + high_noise_L * (0.2f * age_chewed);
+
+      float vhs_snow_R =
+      low_noise_R  * (0.2f + age_mid * 0.3f)
+      + noise_mid    * (0.6f + age_chewed * 0.3f)
+      + high_noise_R * (0.2f * age_chewed);
+
+      // --- Noise Amount / Leveling ---
+      float noise_level = 0.02f + age_mid * 0.05f + age_chewed * 0.15f;
+      float snow_boost  = (effect_amount > 0.95f) ? (effect_amount - 0.95f) * 8.0f : 0.0f;
+      float noise_amount = (noise_level + snow_boost) * (0.8f + breathing * 1.2f);  // breathing mod
+
+      // --- Dropout Logic (gets chaotic at the end) ---
+      float dropout_gain = 1.0f;
+      float dropout_tilt_mod = 0.0f; 
+
+      if (dropout_duration_timer > 0.0f) {
+        // --- We ARE currently dropping out ---
+        dropout_duration_timer -= 1.0f / 96000.0f;
+        dropout_gain = dropout_gain_min;
+        dropout_tilt_mod = 1.0f;
+      } else {
+        // --- We are NOT dropping out, check if we should ---
+        dropout_check_timer -= 1.0f / 96000.0f;
+        if (dropout_check_timer <= 0.0f) {
+          if (Random::GetFloat() < dropout_base_chance) {
+              dropout_duration_timer = 0.001f + Random::GetFloat() * dropout_max_length;
+          }
+          dropout_check_timer = 0.01f + (1.0f - effect_amount) * 0.05f;
         }
+      }
 
-        // Apply dropout gain *before* filtering
-        float signal_A = mix_A * dropout_gain;
-        float signal_B = mix_B * dropout_gain;
+      // Apply dropout gain
+      float signal_A = mix_A * dropout_gain;
+      float signal_B = mix_B * dropout_gain;
 
-        // --- Tilt Filter ---
-        // Uses 4 filters (0,1,2,3) in PARALLEL
-        const float tilt_center_freq = 0.02f; // ~1kHz pivot
-        filter_[0].set_f<stmlib::FREQUENCY_FAST>(tilt_center_freq); // L-LPF
-        filter_[1].set_f<stmlib::FREQUENCY_FAST>(tilt_center_freq); // L-HPF
-        filter_[2].set_f<stmlib::FREQUENCY_FAST>(tilt_center_freq); // R-LPF
-        filter_[3].set_f<stmlib::FREQUENCY_FAST>(tilt_center_freq); // R-HPF
+      // --- Tape Saturation Stage ---
+      float drive = 1.0f + effect_amount * 2.0f;
+      signal_A = stmlib::SoftLimit(signal_A * drive);
+      signal_B = stmlib::SoftLimit(signal_B * drive);
 
-        // Process LPF and HPF versions in parallel from the *original* signal
-        float tilt_lpf_A = filter_[0].Process<stmlib::FILTER_MODE_LOW_PASS>(signal_A);
-        float tilt_hpf_A = filter_[1].Process<stmlib::FILTER_MODE_HIGH_PASS>(signal_A);
-        float tilt_lpf_B = filter_[2].Process<stmlib::FILTER_MODE_LOW_PASS>(signal_B);
-        float tilt_hpf_B = filter_[3].Process<stmlib::FILTER_MODE_HIGH_PASS>(signal_B);
+      // --- Tilt Filter ---
+      float tilt_lpf_A = filter_[0].Process<stmlib::FILTER_MODE_LOW_PASS>(signal_A);
+      float tilt_hpf_A = filter_[1].Process<stmlib::FILTER_MODE_HIGH_PASS>(signal_A);
+      float tilt_lpf_B = filter_[2].Process<stmlib::FILTER_MODE_LOW_PASS>(signal_B);
+      float tilt_hpf_B = filter_[3].Process<stmlib::FILTER_MODE_HIGH_PASS>(signal_B);
 
-        // effect_amount = 0.0 -> tilt_mix = 0.5 (flat)
-        // effect_amount = 1.0 -> tilt_mix = 1.0 (full dark tilt)
-        float tilt_mix = 0.5f + (effect_amount * 0.5f);
+      float tilt_mix = 0.5f + (effect_amount * 0.5f);
 
-        // --- Dropout can override the tilt ---
-        if (dropout_tilt_mod > 0.5f) {
-            tilt_mix = 1.0f; // Force to 100% LPF (dark)
-        }
+      if (dropout_tilt_mod > 0.5f) {
+        tilt_mix = 1.0f; // Force dark
+      }
 
-        float filtered_A = tilt_hpf_A * (1.0f - tilt_mix) + tilt_lpf_A * tilt_mix;
-        float filtered_B = tilt_hpf_B * (1.0f - tilt_mix) + tilt_lpf_B * tilt_mix;
+      float filtered_A = tilt_hpf_A * (1.0f - tilt_mix) + tilt_lpf_A * tilt_mix;
+      float filtered_B = tilt_hpf_B * (1.0f - tilt_mix) + tilt_lpf_B * tilt_mix;
 
-        // --- Add Noise (after filtering, so it's bright) ---
-        processed_A = filtered_A + (noise * noise_amount * 0.04f);
-        processed_B = filtered_B + (noise * noise_amount * 0.04f);
-     }
-     
+      // --- 60Hz Hum ---
+      float hum_instability = age_chewed * (Random::GetFloat() - 0.5f) * 0.02f;
+      float hum_freq = 60.0f + hum_instability; 
+      hum_lfo_phase_ += hum_freq / 96000.0f;
+      if (hum_lfo_phase_ >= 1.0f) hum_lfo_phase_ -= 1.0f;
+      float hum = Interpolate(lut_sin, hum_lfo_phase_, 1024.0f);
+      float hum_amount = effect_amount * 0.03f;
+      
+      // --- Add Noise & Hum ---
+      processed_A = filtered_A + (vhs_snow_L * noise_amount * 0.04f) + (hum * hum_amount);
+      processed_B = filtered_B + (vhs_snow_R * noise_amount * 0.04f) + (hum * hum_amount);
+    }
+
     float fade_wet = Interpolate(lut_xfade_in, xfade_amount, 256.0f);
     float fade_dry = Interpolate(lut_xfade_out, xfade_amount, 256.0f);
 
@@ -1728,11 +1873,11 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
     output->l = Clip16(out_A * 32768.0f);
     output->r = Clip16(out_B * 32768.0f);
 
-     output++;
-   }
+    output++;
+  }
 
-   previous_parameters_.raw_algorithm = parameters_.raw_algorithm;
-   previous_parameters_.modulation_parameter = parameters_.modulation_parameter;
+  previous_parameters_.raw_algorithm = parameters_.raw_algorithm;
+  previous_parameters_.modulation_parameter = parameters_.modulation_parameter;
 }
 
 void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t size) {
@@ -1784,8 +1929,14 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
 
 
   while (size--) {
-    float p1 = p1_interpolator.Next();
-    float p2_raw = timbre_interpolator.Next();
+    bool write_to_buffer = true;
+    
+    // --- Clock to write every other sample ---
+    static bool write_clock = false;
+    write_clock = !write_clock;
+
+    float p1 = timbre_interpolator.Next(); // Crossfader
+    float p2_raw =  p1_interpolator.Next(); // Effect Knob
     float x = p2_raw * 2.0f - 1.0f;
     float p2_skewed = (x * x * x + 1.0f) * 0.5f;
     float timbre = (p2_skewed * 2.0f) - 1.0f;
@@ -1801,8 +1952,7 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
 
     float effect_amount = fabs(timbre);
 
-    // Calculate Fast Crossfade based on absolute amount
-    const float xfade_threshold = 0.02f;
+    const float xfade_threshold = 0.05f;
     float xfade_amount = 0.0f;
     if (effect_amount < xfade_threshold) {
       xfade_amount = effect_amount / xfade_threshold;
@@ -1812,14 +1962,164 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
 
     float processed_A = 0.0f;
     float processed_B = 0.0f;
-
     float out_A = 0.0f;
     float out_B = 0.0f;
 
     if (timbre < 0.0f) {
-      //  CCW: Packet Loss / Glitches
+      // --- CCW: Granular Smear / Chorus ---
+      static float feedback_l = 0.0f, feedback_r = 0.0f;
+      static float smear_lfo_phase_ = 0.0f;
+      static float smear_lfo_target_val_ = 0.5f;
+      static float smear_lfo_current_val_ = 0.5f;
+      static float chorus_lfo_phase_ = 0.0f;
+      static float pitch_offset_l_ = 0.0f;
+      static float pitch_offset_r_ = 0.0f;
+
+      // Calculate Target Delay
+      float base_delay_samples = 2880.0f + effect_amount * 8640.0f;
       
-      // --- Static variables for ALL glitch types ---
+      // Update Smear LFO
+      smear_lfo_phase_ += 0.2f / 96000.0f; 
+      if (smear_lfo_phase_ >= 1.0f) {
+          smear_lfo_phase_ -= 1.0f;
+          smear_lfo_target_val_ = Random::GetFloat();
+      }
+      ONE_POLE(smear_lfo_current_val_, smear_lfo_target_val_, 0.0005f);
+      float smear_mod = (smear_lfo_current_val_ - 0.5f) * 2.0f;
+
+      // Update the Chorus LFO
+      chorus_lfo_phase_ += 0.3f / 96000.0f;
+      if (chorus_lfo_phase_ >= 1.0f) chorus_lfo_phase_ -= 1.0f;
+      float chorus_mod = Interpolate(lut_sin, chorus_lfo_phase_, 1024.0f);
+
+      // Calculate Final Read Positions
+      float smear_mod_amount = effect_amount * 1920.0f; 
+      float stereo_offset = (100.0f + chorus_mod * 100.0f) * effect_amount;
+      
+      float delay_l_samples = base_delay_samples - stereo_offset + (smear_mod * smear_mod_amount);
+      float delay_r_samples = base_delay_samples + stereo_offset - (smear_mod * smear_mod_amount);
+
+      float pitch_shift_rate = 0.0f; 
+      const float pitch_threshold = 0.8f;
+      
+      if (effect_amount > pitch_threshold) {
+          float pitch_ramp = (effect_amount - pitch_threshold) / (1.0f - pitch_threshold); 
+  
+          // +7 semitones
+          pitch_shift_rate = 0.498f * pitch_ramp; 
+      } else {
+          // Reset the offsets when not in use
+          pitch_offset_l_ = 0.0f;
+          pitch_offset_r_ = 0.0f;
+      }
+      
+      pitch_offset_l_ += pitch_shift_rate;
+      pitch_offset_r_ += pitch_shift_rate;
+
+      //fmod the pitch offsets
+      if (pitch_offset_l_ >= kSharedDelaySize)
+      pitch_offset_l_ -= kSharedDelaySize;
+      else if (pitch_offset_l_ < 0.0f)
+      pitch_offset_l_ += kSharedDelaySize;
+
+      if (pitch_offset_r_ >= kSharedDelaySize)
+      pitch_offset_r_ -= kSharedDelaySize;
+      else if (pitch_offset_r_ < 0.0f)
+      pitch_offset_r_ += kSharedDelaySize;
+      
+      // Apply the pitch offset to the read position
+      float read_pos_l_to_use = (float)shared_write_pos_ - delay_l_samples + pitch_offset_l_;
+      float read_pos_r_to_use = (float)shared_write_pos_ - delay_r_samples + pitch_offset_r_;
+      
+      // --- Read audio (L Channel) ---
+      float delayed_l;
+      {
+          float read_pos = read_pos_l_to_use;
+          if (read_pos >= kSharedDelaySize) read_pos -= kSharedDelaySize;
+          else if (read_pos < 0.0f) read_pos += kSharedDelaySize;
+          MAKE_INTEGRAL_FRACTIONAL(read_pos);
+          int32_t index_integral = read_pos_integral;
+          float index_fractional = read_pos_fractional;
+          const float kToFloat = 1.0f / 32768.0f;
+          const int mask = kSharedDelaySize - 1;
+          float xm1_l = static_cast<float>(delay_buffer_[(index_integral - 1) & mask].l) * kToFloat;
+          float x0_l  = static_cast<float>(delay_buffer_[ index_integral & mask].l) * kToFloat;
+          float x1_l  = static_cast<float>(delay_buffer_[(index_integral + 1) & mask].l) * kToFloat;
+          float x2_l  = static_cast<float>(delay_buffer_[(index_integral + 2) & mask].l) * kToFloat;
+          FloatFrame c = { (x1_l - xm1_l) * 0.5f, 0.0f };
+          FloatFrame v = { (float)(x0_l - x1_l), 0.0f};
+          FloatFrame w = { c.l + v.l, 0.0f };
+          FloatFrame a = { w.l + v.l + (x2_l - x0_l) * 0.5f, 0.0f };
+          FloatFrame b_neg = { w.l + a.l, 0.0f };
+          float t = index_fractional;
+          delayed_l = ((((a.l * t) - b_neg.l) * t + c.l) * t + x0_l);
+      }
+
+      // --- Read audio (R Channel) ---
+      float delayed_r;
+      {
+          float read_pos = read_pos_r_to_use;
+          if (read_pos >= kSharedDelaySize) read_pos -= kSharedDelaySize;
+          else if (read_pos < 0.0f) read_pos += kSharedDelaySize;
+          MAKE_INTEGRAL_FRACTIONAL(read_pos);
+          int32_t index_integral = read_pos_integral;
+          float index_fractional = read_pos_fractional;
+          const float kToFloat = 1.0f / 32768.0f;
+          const int mask = kSharedDelaySize - 1;
+
+          float xm1_r = static_cast<float>(delay_buffer_[(index_integral - 1) & mask].r) * kToFloat;
+          float x0_r  = static_cast<float>(delay_buffer_[ index_integral & mask].r) * kToFloat;
+          float x1_r  = static_cast<float>(delay_buffer_[(index_integral + 1) & mask].r) * kToFloat;
+          float x2_r  = static_cast<float>(delay_buffer_[(index_integral + 2) & mask].r) * kToFloat;
+          FloatFrame c = { 0.0f, (x1_r - xm1_r) * 0.5f };
+          FloatFrame v = { 0.0f, (float)(x0_r - x1_r)};
+          FloatFrame w = { 0.0f, c.r + v.r };
+          FloatFrame a = { 0.0f, w.r + v.r + (x2_r - x0_r) * 0.5f };
+          FloatFrame b_neg = { 0.0f, w.r + a.r };
+          float t = index_fractional;
+          delayed_r = ((((a.r * t) - b_neg.r) * t + c.r) * t + x0_r);
+      }
+
+      // --- "Smear Magic" (Internal Feedback) ---
+      float effect_ramp = fminf(effect_amount / pitch_threshold, 1.0f);
+
+      // Feedback now maxes out at 0.75 *at 80% knob*
+      const float max_feedback_level = 0.75f; // Tune this max level
+      float feedback_amount = effect_ramp * max_feedback_level;
+      
+      // Input amount now hits its minimum *at 80% knob* and stays there
+      float input_amount = 1.0f - (effect_ramp * 0.85f); 
+      
+      // --- This is the original, simple feedback path ---
+      float feedback_in_l = mix_A * input_amount + (feedback_l * feedback_amount);
+      float feedback_in_r = mix_B * input_amount + (feedback_r * feedback_amount);
+      
+      delayed_l += feedback_in_l;
+      delayed_r += feedback_in_r;
+      
+      feedback_l = stmlib::SoftLimit(delayed_l);
+      feedback_r = stmlib::SoftLimit(delayed_r);
+
+      // --- Set Output ---
+      processed_A = feedback_l;
+      processed_B = feedback_r;
+    } else {
+      // --- CW: Glitches ---
+      static int decimation_counter_ = 0;
+      static float latched_l_ = 0.0f;
+      static float latched_r_ = 0.0f;
+      static bool decimator_needs_reset_ = true;
+
+      // 32kHz Decimator for glitch stability
+      decimation_counter_ = (decimation_counter_ + 1) % 3;
+      if (decimation_counter_ == 0 || decimator_needs_reset_) {
+          // "Latch" a new sample
+          latched_l_ = mix_A;
+          latched_r_ = mix_B;
+          decimator_needs_reset_ = false;
+      }
+
+      // --- Static variables ---
       static float glitch_timer = 0.0f;
       static bool currently_glitching = false;
       static float glitch_hold_duration = 0.0f;
@@ -1830,276 +2130,237 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
       static float loop_read_pos_f = 0.0f;
       static float loop_start_pos_f = 0.0f;
       static float loop_length_f = 0.0f;
+      static float birdie_lfo_phase_ = 0.0f;
+      static float birdie_lfo_target_val_ = 0.5f;
+      static float birdie_lfo_current_val_ = 0.5f;
+      static float loop_read_speed = 1.0f;
+      static bool force_loop_needs_capture = true;
+      const float force_loop_threshold = 0.99f;
+      static float force_loop_p1_center_ = 0.5f;
 
       const float silence_threshold = 0.0001f;
       bool is_silent = (fabs(mix_A) < silence_threshold) && (fabs(mix_B) < silence_threshold);
 
       glitch_timer -= 1.0f / 96000.0f;
 
-      if (currently_glitching) {
-        if (is_silent) {
-            currently_glitching = false;
-            pitch_glitching = false;
-            micro_looping = false;
-        }
-
-        float delayed_l = 0.0f, delayed_r = 0.0f; // Initialized to silence
-
-        if (pitch_glitching) {
-            // --- PITCH GLITCH: Read from buffer at new speed ---
-            glitch_read_pos_f += glitch_read_speed;
-            while (glitch_read_pos_f < 0.0f) {
-              glitch_read_pos_f += kSharedDelaySize;
-            }
-            glitch_read_pos_f = fmodf(glitch_read_pos_f, (float)kSharedDelaySize);
-
-            // Interpolate using your Hermite logic
-            MAKE_INTEGRAL_FRACTIONAL(glitch_read_pos_f);
-            {
-                int32_t index_integral = glitch_read_pos_f_integral;
-                float index_fractional = glitch_read_pos_f_fractional;
-                const float kToFloat = 1.0f / 32768.0f;
-                float xm1_l = static_cast<float>(delay_buffer_[(index_integral - 1 + kSharedDelaySize) % kSharedDelaySize].l) * kToFloat;
-                float x0_l  = static_cast<float>(delay_buffer_[index_integral].l) * kToFloat;
-                float x1_l  = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].l) * kToFloat;
-                float x2_l  = static_cast<float>(delay_buffer_[(index_integral + 2) % kSharedDelaySize].l) * kToFloat;
-                float xm1_r = static_cast<float>(delay_buffer_[(index_integral - 1 + kSharedDelaySize) % kSharedDelaySize].r) * kToFloat;
-                float x0_r  = static_cast<float>(delay_buffer_[index_integral].r) * kToFloat;
-                float x1_r  = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].r) * kToFloat;
-                float x2_r  = static_cast<float>(delay_buffer_[(index_integral + 2) % kSharedDelaySize].r) * kToFloat;
-                FloatFrame c = { (x1_l - xm1_l) * 0.5f, (x1_r - xm1_r) * 0.5f };
-                FloatFrame v = { (float)(x0_l - x1_l), (float)(x0_r - x1_r)};
-                FloatFrame w = { c.l + v.l, c.r + v.r };
-                FloatFrame a = { w.l + v.l + (x2_l - x0_l) * 0.5f, w.r + v.r + (x2_r - x0_r) * 0.5f };
-                FloatFrame b_neg = { w.l + a.l, w.r + a.r };
-                float t = index_fractional;
-                delayed_l = ((((a.l * t) - b_neg.l) * t + c.l) * t + x0_l);
-                delayed_r = ((((a.r * t) - b_neg.r) * t + c.r) * t + x0_r);
-            }
-
-        } else if (micro_looping) {
-            // --- MICRO-LOOP (Stutter) GLITCH ---
-            loop_read_pos_f += 1.0f; // Read at normal speed
-            if (loop_read_pos_f >= (loop_start_pos_f + loop_length_f)) {
-                loop_read_pos_f = loop_start_pos_f; // Wrap back to start
-            }
-            loop_read_pos_f = fmodf(loop_read_pos_f, (float)kSharedDelaySize);
-
-            // Interpolate using your Hermite logic (Again)
-            MAKE_INTEGRAL_FRACTIONAL(loop_read_pos_f);
-            {
-                int32_t index_integral = loop_read_pos_f_integral;
-                float index_fractional = loop_read_pos_f_fractional;
-                const float kToFloat = 1.0f / 32768.0f;
-                float xm1_l = static_cast<float>(delay_buffer_[(index_integral - 1 + kSharedDelaySize) % kSharedDelaySize].l) * kToFloat;
-                float x0_l  = static_cast<float>(delay_buffer_[index_integral].l) * kToFloat;
-                float x1_l  = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].l) * kToFloat;
-                float x2_l  = static_cast<float>(delay_buffer_[(index_integral + 2) % kSharedDelaySize].l) * kToFloat;
-                float xm1_r = static_cast<float>(delay_buffer_[(index_integral - 1 + kSharedDelaySize) % kSharedDelaySize].r) * kToFloat;
-                float x0_r  = static_cast<float>(delay_buffer_[index_integral].r) * kToFloat;
-                float x1_r  = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].r) * kToFloat;
-                float x2_r  = static_cast<float>(delay_buffer_[(index_integral + 2) % kSharedDelaySize].r) * kToFloat;
-                FloatFrame c = { (x1_l - xm1_l) * 0.5f, (x1_r - xm1_r) * 0.5f };
-                FloatFrame v = { (float)(x0_l - x1_l), (float)(x0_r - x1_r)};
-                FloatFrame w = { c.l + v.l, c.r + v.r };
-                FloatFrame a = { w.l + v.l + (x2_l - x0_l) * 0.5f, w.r + v.r + (x2_r - x0_r) * 0.5f };
-                FloatFrame b_neg = { w.l + a.l, w.r + a.r };
-                float t = index_fractional;
-                delayed_l = ((((a.l * t) - b_neg.l) * t + c.l) * t + x0_l);
-                delayed_r = ((((a.r * t) - b_neg.r) * t + c.r) * t + x0_r);
-            }
-        }
-        
-        processed_A = delayed_l;
-        processed_B = delayed_r;
-
-        // --- Check for end of glitch (applies to both types) ---
-        glitch_hold_duration -= 1.0f / 96000.0f;
-        if (glitch_hold_duration <= 0.0f) {
-            currently_glitching = false;
-            pitch_glitching = false;
-            micro_looping = false;
-            glitch_timer = 0.005f + Random::GetFloat() * 0.01f;
-        }
-
-      } else {
-        // --- Normal Pass-through ---
-        processed_A = mix_A;
-        processed_B = mix_B;
-
-        // --- Check if we should start a glitch ---
-        if (glitch_timer <= 0.0f) {
-          float glitch_chance = effect_amount * 0.5f; // Using your faster 0.5f chance
+      // --- Glitch Trigger Logic ---
+      if (effect_amount >= force_loop_threshold) {
+          // --- FORCED LOOP ZONE ---
           
-          // --- Don't start a new glitch if silent ---
-          if (Random::GetFloat() < glitch_chance && !is_silent) {
-            
-            // --- START GLITCH ---
-            currently_glitching = true;
-            glitch_hold_duration = 0.001f + Random::GetFloat() * (0.25f * effect_amount); 
-            
-            if (Random::GetFloat() < effect_amount) {
-                // --- YES, PITCH GLITCH ---
-                pitch_glitching = true;
-                micro_looping = false;
-                
-                float random_mod = Random::GetFloat() * 0.1f - 0.05f;
-                int speed_choice = static_cast<int>(Random::GetFloat() * 3.0f);
-                if (speed_choice == 0)      glitch_read_speed = 0.5f + random_mod;
-                else if (speed_choice == 1) glitch_read_speed = 2.0f + random_mod;
-                else                        glitch_read_speed = -1.0f + random_mod;
-                
-                int32_t random_offset = 100 + static_cast<int>(Random::GetFloat() * (kSharedDelaySize - 200));
-                glitch_read_pos_f = (float)((shared_write_pos_ - random_offset + kSharedDelaySize) % kSharedDelaySize);
-
-            } else {
-                // --- NO, do a MICRO-LOOP GLITCH ---
-                pitch_glitching = false;
-                micro_looping = true;
-                
-                loop_length_f = 480.0f + Random::GetFloat() * 1920.0f; // 5-25ms
-                int32_t random_offset = 100 + static_cast<int>(Random::GetFloat() * 4700.0f); // last 50ms
-                loop_start_pos_f = (float)((shared_write_pos_ - random_offset + kSharedDelaySize) % kSharedDelaySize);
-                loop_read_pos_f = loop_start_pos_f;
-            }
-
-          } else {
-            // No glitch this time, reset check timer
-            glitch_timer = 0.01f + Random::GetFloat() * (0.05f * (1.0f - effect_amount));
+          write_to_buffer = false; 
+          currently_glitching = true;
+          pitch_glitching = false;
+          micro_looping = true;
+          
+          if (force_loop_needs_capture && !is_silent) {
+              loop_length_f = 11520.0f; // 120ms
+              loop_start_pos_f = (float)(static_cast<int32_t>(shared_write_pos_ - loop_length_f + kSharedDelaySize) % kSharedDelaySize);
+              loop_read_pos_f = loop_start_pos_f;
+              force_loop_p1_center_ = p1;
+              force_loop_needs_capture = false;
           }
-        }
+          
+          float delta = p1 - force_loop_p1_center_;
+          const float speed_sensitivity = 2.0f;
+          loop_read_speed = 0.5f + delta * speed_sensitivity;
+      } else {
+          // --- NORMAL PROBABILISTIC ZONE (0% to 99%) ---
+          
+          force_loop_needs_capture = true; 
+          
+          if (currently_glitching) {
+              glitch_hold_duration -= 1.0f / 96000.0f;
+              if (glitch_hold_duration <= 0.0f || is_silent) {
+                  currently_glitching = false;
+                  pitch_glitching = false;
+                  micro_looping = false;
+                  glitch_timer = 0.005f + Random::GetFloat() * 0.01f;
+              }
+          } else {
+              if (glitch_timer <= 0.0f) {
+                
+                float glitch_chance = sqrtf(effect_amount) * 0.25f;
+                
+                if (Random::GetFloat() < glitch_chance && !is_silent) {
+                  
+                  currently_glitching = true;
+                  
+                  float max_duration = 3.0f * effect_amount;
+                  glitch_hold_duration = 0.05f + Random::GetFloat() * max_duration; 
+                  
+                  const float pitch_threshold = 0.5f;
+                  pitch_glitching = false;
+                  micro_looping = false;
+                  
+                  if (effect_amount < pitch_threshold) {
+                      micro_looping = true;
+                  } else {
+                      float pitch_chance = (effect_amount - pitch_threshold) * 2.0f;
+                      if (Random::GetFloat() < pitch_chance) {
+                          pitch_glitching = true;
+                      } else {
+                          micro_looping = true;
+                      }
+                  }
+
+                  if (pitch_glitching) {
+                      float random_mod = Random::GetFloat() * 0.1f - 0.05f;
+                      int speed_choice = static_cast<int>(Random::GetFloat() * 3.0f);
+                      
+                      if (speed_choice == 0)      glitch_read_speed = 0.25f + random_mod;
+                      else if (speed_choice == 1) glitch_read_speed = 0.125f + random_mod;
+                      else                        glitch_read_speed = -0.5f + random_mod;
+                      
+                      int32_t random_offset = 100 + static_cast<int>(Random::GetFloat() * (kSharedDelaySize - 200));
+                      glitch_read_pos_f = (float)((shared_write_pos_ - random_offset + kSharedDelaySize) % kSharedDelaySize);
+
+                  } else { // This is a micro_loop
+                      loop_read_speed = 0.5f; 
+                      
+                      // Was 24000.0f (0.25 sec). Let's try 96000.0f (1 sec).
+                      float max_loop_length = 96000.0f * effect_amount;
+                      loop_length_f = 4800.0f + Random::GetFloat() * max_loop_length; 
+                      int32_t random_offset = 100 + static_cast<int>(Random::GetFloat() * 4700.0f);
+                      loop_start_pos_f = (float)(static_cast<int32_t>(shared_write_pos_ - random_offset + kSharedDelaySize) % kSharedDelaySize);
+                      loop_read_pos_f = loop_start_pos_f;
+                  }
+                } else {
+                  glitch_timer = 0.04f + Random::GetFloat() * (0.1f * (1.0f - effect_amount));
+                }
+              }
+          }
       }
-    } else {
-        // --- CW: Granular Smear / Stasis  ---
-        // --- State ---
-        static float current_delay_samples_ = 2880.0f;
-        static float feedback_l = 0.0f, feedback_r = 0.0f;
-        static float smear_lfo_phase_ = 0.0f;
-        static float smear_lfo_target_val_ = 0.5f;
-        static float smear_lfo_current_val_ = 0.5f;
-        static float smoothed_input_mix = 0.0f;
+      
+      // --- Glitch "Player" Logic ---
+      float glitch_l = 0.0f, glitch_r = 0.0f;
 
-        // Calculate Target Delay
-        float base_delay_samples = 2880.0f + effect_amount * 8640.0f;
-        
-        // Slew the current delay time
-        ONE_POLE(current_delay_samples_, base_delay_samples, 0.001f);
+      if (currently_glitching) {
+          if (pitch_glitching) {
+              // --- PITCH GLITCH ---
+              glitch_read_pos_f += glitch_read_speed;
+              while (glitch_read_pos_f < 0.0f) {
+                glitch_read_pos_f += kSharedDelaySize;
+              }
+              while (glitch_read_pos_f >= kSharedDelaySize) {
+                glitch_read_pos_f -= kSharedDelaySize;
+              }
+              
+              MAKE_INTEGRAL_FRACTIONAL(glitch_read_pos_f);
+              { /* (Hermite code) */
+                  int32_t index_integral = glitch_read_pos_f_integral;
+                  float index_fractional = glitch_read_pos_f_fractional;
+                  const float kToFloat = 1.0f / 32768.0f;
+                  float xm1_l = static_cast<float>(delay_buffer_[(index_integral - 1 + kSharedDelaySize) % kSharedDelaySize].l) * kToFloat;
+                  float x0_l  = static_cast<float>(delay_buffer_[index_integral].l) * kToFloat;
+                  float x1_l  = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].l) * kToFloat;
+                  float x2_l  = static_cast<float>(delay_buffer_[(index_integral + 2) % kSharedDelaySize].l) * kToFloat;
+                  float xm1_r = static_cast<float>(delay_buffer_[(index_integral - 1 + kSharedDelaySize) % kSharedDelaySize].r) * kToFloat;
+                  float x0_r  = static_cast<float>(delay_buffer_[index_integral].r) * kToFloat;
+                  float x1_r  = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].r) * kToFloat;
+                  float x2_r  = static_cast<float>(delay_buffer_[(index_integral + 2) % kSharedDelaySize].r) * kToFloat;
+                  FloatFrame c = { (x1_l - xm1_l) * 0.5f, (x1_r - xm1_r) * 0.5f };
+                  FloatFrame v = { (float)(x0_l - x1_l), (float)(x0_r - x1_r)};
+                  FloatFrame w = { c.l + v.l, c.r + v.r };
+                  FloatFrame a = { w.l + v.l + (x2_l - x0_l) * 0.5f, w.r + v.r + (x2_r - x0_r) * 0.5f };
+                  FloatFrame b_neg = { w.l + a.l, w.r + a.r };
+                  float t = index_fractional;
+                  glitch_l = ((((a.l * t) - b_neg.l) * t + c.l) * t + x0_l);
+                  glitch_r = ((((a.r * t) - b_neg.r) * t + c.r) * t + x0_r);
+              }
 
-        // --- STASIS LOGIC  ---
-        float delta = fabs(base_delay_samples - current_delay_samples_);
-        const float stasis_threshold = 0.1f;
-        float input_mix = (delta > stasis_threshold) ? 1.0f : 0.0f; // Raw 0/1 signal
-        
-        // --- Smooth the raw mix, but with different attack/release ---
-        // Attack is fast (0.005f), Release is slow (0.0001f)
-        float slew_rate = (input_mix > smoothed_input_mix) ? 0.005f : 0.0001f;
-        ONE_POLE(smoothed_input_mix, input_mix, slew_rate);
-        
-        // --- Update the Smear LFO ---
-        smear_lfo_phase_ += 0.5f / 96000.0f;
-        if (smear_lfo_phase_ >= 1.0f) {
-            smear_lfo_phase_ -= 1.0f;
-            smear_lfo_target_val_ = Random::GetFloat();
-        }
-        ONE_POLE(smear_lfo_current_val_, smear_lfo_target_val_, 0.0005f);
-        float smear_mod = (smear_lfo_current_val_ - 0.5f) * 2.0f;
+          } else if (micro_looping) {
+              // --- MICRO-LOOP ---
+              loop_read_pos_f += loop_read_speed; 
+              
+              float loop_end_pos = loop_start_pos_f + loop_length_f;
+              
+              if (loop_read_speed > 0.0f && loop_read_pos_f >= loop_end_pos) {
+                  loop_read_pos_f -= loop_length_f;
+              } else if (loop_read_speed < 0.0f && loop_read_pos_f < loop_start_pos_f) {
+                  loop_read_pos_f += loop_length_f;
+              }
+              
+              float read_pos_for_hermite = loop_read_pos_f;
+              while (read_pos_for_hermite < 0.0f) {
+                read_pos_for_hermite += kSharedDelaySize;
+              }
+              read_pos_for_hermite = fmodf(read_pos_for_hermite, (float)kSharedDelaySize);
 
-        // --- Calculate Final Read Positions ---
-        // Increased LFO modulation from 960.0f to 2880.0f (3x)
-        float smear_mod_amount = effect_amount * 2880.0f * smoothed_input_mix;
-        float stereo_offset = effect_amount * 200.0f * smoothed_input_mix;
-        
-        float delay_l_samples = current_delay_samples_ - stereo_offset + (smear_mod * smear_mod_amount);
-        float delay_r_samples = current_delay_samples_ + stereo_offset - (smear_mod * smear_mod_amount); // Invert LFO for R
+              MAKE_INTEGRAL_FRACTIONAL(read_pos_for_hermite);
+              { /* (Hermite code) */
+                  int32_t index_integral = read_pos_for_hermite_integral;
+                  float index_fractional = read_pos_for_hermite_fractional;
+                  const float kToFloat = 1.0f / 32768.0f;
+                  float xm1_l = static_cast<float>(delay_buffer_[(index_integral - 1 + kSharedDelaySize) % kSharedDelaySize].l) * kToFloat;
+                  float x0_l  = static_cast<float>(delay_buffer_[index_integral].l) * kToFloat;
+                  float x1_l  = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].l) * kToFloat;
+                  float x2_l  = static_cast<float>(delay_buffer_[(index_integral + 2) % kSharedDelaySize].l) * kToFloat;
+                  float xm1_r = static_cast<float>(delay_buffer_[(index_integral - 1 + kSharedDelaySize) % kSharedDelaySize].r) * kToFloat;
+                  float x0_r  = static_cast<float>(delay_buffer_[index_integral].r) * kToFloat;
+                  float x1_r  = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].r) * kToFloat;
+                  float x2_r  = static_cast<float>(delay_buffer_[(index_integral + 2) % kSharedDelaySize].r) * kToFloat;
+                  FloatFrame c = { (x1_l - xm1_l) * 0.5f, (x1_r - xm1_r) * 0.5f };
+                  FloatFrame v = { (float)(x0_l - x1_l), (float)(x0_r - x1_r)};
+                  FloatFrame w = { c.l + v.l, c.r + v.r };
+                  FloatFrame a = { w.l + v.l + (x2_l - x0_l) * 0.5f, w.r + v.r + (x2_r - x0_r) * 0.5f };
+                  FloatFrame b_neg = { w.l + a.l, w.r + a.r };
+                  float t = index_fractional;
+                  glitch_l = ((((a.l * t) - b_neg.l) * t + c.l) * t + x0_l);
+                  glitch_r = ((((a.r * t) - b_neg.r) * t + c.r) * t + x0_r);
+              }
+          }
+      }
+      
+      // --- "Birdie" ---
+      birdie_lfo_phase_ += (0.5f + effect_amount * 3.0f) / 96000.0f;
+      if (birdie_lfo_phase_ >= 1.0f) {
+          birdie_lfo_phase_ -= 1.0f;
+          birdie_lfo_target_val_ = Random::GetFloat();
+      }
+      ONE_POLE(birdie_lfo_current_val_, birdie_lfo_target_val_, 0.001f);
+      float bpf_cutoff = 0.1f + (birdie_lfo_current_val_ * 0.2f);
+      float birdie_curve = sqrtf(effect_amount);
+      float bpf_resonance = 1.0f + birdie_curve * 30.0f;
+      
+      lossy_bpf_l_.set_f_q<stmlib::FREQUENCY_FAST>(bpf_cutoff, bpf_resonance);
+      lossy_bpf_r_.set_f_q<stmlib::FREQUENCY_FAST>(bpf_cutoff, bpf_resonance);
+      
+      float base_signal_l = (currently_glitching) ? glitch_l : latched_l_;
+      float base_signal_r = (currently_glitching) ? glitch_r : latched_r_;
 
-        float read_pos_l_to_use = (float)shared_write_pos_ - delay_l_samples;
-        float read_pos_r_to_use = (float)shared_write_pos_ - delay_r_samples;
-        
-        // --- Read audio (L Channel) ---
-        float delayed_l;
-        { /* (Identical Read Block) */ 
-            float read_pos = read_pos_l_to_use;
-            while (read_pos < 0.0f) read_pos += kSharedDelaySize;
-            read_pos = fmodf(read_pos, (float)kSharedDelaySize);
-            MAKE_INTEGRAL_FRACTIONAL(read_pos);
-            int32_t index_integral = read_pos_integral;
-            float index_fractional = read_pos_fractional;
-            const float kToFloat = 1.0f / 32768.0f;
-            float xm1_l = static_cast<float>(delay_buffer_[((index_integral - 1) + kSharedDelaySize) % kSharedDelaySize].l) * kToFloat;
-            float x0_l  = static_cast<float>(delay_buffer_[index_integral].l) * kToFloat;
-            float x1_l  = static_cast<float>(delay_buffer_[((index_integral + 1) + kSharedDelaySize) % kSharedDelaySize].l) * kToFloat;
-            float x2_l  = static_cast<float>(delay_buffer_[((index_integral + 2) + kSharedDelaySize) % kSharedDelaySize].l) * kToFloat;
-            FloatFrame c = { (x1_l - xm1_l) * 0.5f, 0.0f };
-            FloatFrame v = { (float)(x0_l - x1_l), 0.0f};
-            FloatFrame w = { c.l + v.l, 0.0f };
-            FloatFrame a = { w.l + v.l + (x2_l - x0_l) * 0.5f, 0.0f };
-            FloatFrame b_neg = { w.l + a.l, 0.0f };
-            float t = index_fractional;
-            delayed_l = ((((a.l * t) - b_neg.l) * t + c.l) * t + x0_l);
-        }
-
-        // --- Read audio (R Channel) ---
-        float delayed_r;
-        { /* (Identical Read Block) */
-            float read_pos = read_pos_r_to_use;
-            while (read_pos < 0.0f) read_pos += kSharedDelaySize;
-            read_pos = fmodf(read_pos, (float)kSharedDelaySize);
-            MAKE_INTEGRAL_FRACTIONAL(read_pos);
-            int32_t index_integral = read_pos_integral;
-            float index_fractional = read_pos_fractional;
-            const float kToFloat = 1.0f / 32768.0f;
-            float xm1_r = static_cast<float>(delay_buffer_[((index_integral - 1) + kSharedDelaySize) % kSharedDelaySize].r) * kToFloat;
-            float x0_r  = static_cast<float>(delay_buffer_[index_integral].r) * kToFloat;
-            float x1_r  = static_cast<float>(delay_buffer_[((index_integral + 1) + kSharedDelaySize) % kSharedDelaySize].r) * kToFloat;
-            float x2_r  = static_cast<float>(delay_buffer_[((index_integral + 2) + kSharedDelaySize) % kSharedDelaySize].r) * kToFloat;
-            FloatFrame c = { 0.0f, (x1_r - xm1_r) * 0.5f };
-            FloatFrame v = { 0.0f, (float)(x0_r - x1_r)};
-            FloatFrame w = { 0.0f, c.r + v.r };
-            FloatFrame a = { 0.0f, w.r + v.r + (x2_r - x0_r) * 0.5f };
-            FloatFrame b_neg = { 0.0f, w.r + a.r };
-            float t = index_fractional;
-            delayed_r = ((((a.r * t) - b_neg.r) * t + c.r) * t + x0_r);
-        }
-
-        // --- Feedback (for smearing) ---
-        float feedback_amount = effect_amount * 0.92f * smoothed_input_mix; 
-
-        float current_out_l = delayed_l;
-        float current_out_r = delayed_r;
-        delayed_l += feedback_l * feedback_amount;
-        delayed_r += feedback_r * feedback_amount;
-        
-        feedback_l = current_out_l * smoothed_input_mix; 
-        feedback_r = current_out_r * smoothed_input_mix;
-        
-        delayed_l = stmlib::SoftLimit(delayed_l);
-        delayed_r = stmlib::SoftLimit(delayed_r);
-
-        // --- Set Output ---
-        processed_A = delayed_l;
-        processed_B = delayed_r;
+      float birdie_l = lossy_bpf_l_.Process<stmlib::FILTER_MODE_BAND_PASS>(base_signal_l);
+      float birdie_r = lossy_bpf_r_.Process<stmlib::FILTER_MODE_BAND_PASS>(base_signal_r);
+      
+      // --- Final Mix ---
+      float birdie_mix = birdie_curve * 0.5f;
+      
+      processed_A = base_signal_l * (1.0f - birdie_mix) + birdie_l * birdie_mix;
+      processed_B = base_signal_r * (1.0f - birdie_mix) + birdie_r * birdie_mix;
     }
 
+    // --- FINAL MIX ---
     float fade_wet = Interpolate(lut_xfade_in, xfade_amount, 256.0f);
     float fade_dry = Interpolate(lut_xfade_out, xfade_amount, 256.0f);
 
     out_A = mix_A * fade_dry + processed_A * fade_wet;
     out_B = mix_B * fade_dry + processed_B * fade_wet;
-
-    delay_buffer_[shared_write_pos_].l = Clip16(mix_A * 32768.0f);
-    delay_buffer_[shared_write_pos_].r = Clip16(mix_B * 32768.0f);
-    shared_write_pos_ = (shared_write_pos_ + 1) % kSharedDelaySize;
+    
+    if (write_to_buffer) {
+        if (write_clock) { // Only write every other sample
+            delay_buffer_[shared_write_pos_].l = Clip16(mix_A * 32768.0f);
+            delay_buffer_[shared_write_pos_].r = Clip16(mix_B * 32768.0f);
+            shared_write_pos_ = (shared_write_pos_ + 1) % kSharedDelaySize;
+        }
+    }
 
     output->l = Clip16(out_A * 32768.0f);
     output->r = Clip16(out_B * 32768.0f);
-
     output++;
   }
 
    previous_parameters_.raw_algorithm = parameters_.raw_algorithm;
    previous_parameters_.modulation_parameter = parameters_.modulation_parameter;
 }
-
 /* static */
 Modulator::XmodFn Modulator::xmod_table_[] = {
   &Modulator::ProcessXmod<ALGORITHM_XFADE, ALGORITHM_FOLD>,
