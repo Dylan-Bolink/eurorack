@@ -199,6 +199,17 @@ void Settings::Init() {
   
   state_.color_blind = 0;
   state_.explicit_reset = 0;
+
+  state_.grids_x = 0;
+  state_.grids_y = 0;
+  state_.grids_chaos = 0;
+
+  state_.grids_x_cv_swap = 0;
+  state_.grids_y_cv_swap = 0;
+  state_.grids_chaos_cv_swap = 0;
+
+  state_.deja_vu_t_cv_swap = 0;
+  state_.deja_vu_x_cv_swap = 0;
   
   freshly_baked_ = !chunk_storage_.Init(&persistent_data_, &state_);
   

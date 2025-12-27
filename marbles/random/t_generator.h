@@ -30,6 +30,8 @@
 #define MARBLES_RANDOM_T_GENERATOR_H_
 
 #include "stmlib/stmlib.h"
+#include "marbles/io_buffer.h"
+#include "grids/pattern_generator.h"
 
 #include "marbles/ramp/ramp_divider.h"
 #include "marbles/ramp/ramp_extractor.h"
@@ -48,7 +50,7 @@ enum TGeneratorModel {
 
   T_GENERATOR_MODEL_INDEPENDENT_BERNOULLI,
   T_GENERATOR_MODEL_DIVIDER,
-  T_GENERATOR_MODEL_THREE_STATES,
+  T_GENERATOR_MODEL_GRIDS,
   
   T_GENERATOR_MODEL_MARKOV,
 };
@@ -138,6 +140,40 @@ class TGenerator {
   inline void set_pulse_width_std(float pulse_width_std) {
     pulse_width_std_ = pulse_width_std;
   }
+
+  void set_grids_coordinates(float x, float y, float chaos) {
+      grids_x_ = x;
+      grids_y_ = y;
+      grids_chaos_ = chaos;
+  }
+  
+  void set_grids_densities(float kick, float snare, float hh) {
+      float k = kick  < 0.0f ? 0.0f : (kick  > 1.0f ? 1.0f : kick);
+      float s = snare < 0.0f ? 0.0f : (snare > 1.0f ? 1.0f : snare);
+      float h = hh    < 0.0f ? 0.0f : (hh    > 1.0f ? 1.0f : hh);
+
+      dens_kick_  = k;
+      dens_snare_ = s;
+      dens_hh_    = h;
+  }
+
+  void set_grids_length(int length) {
+      grids_length_ = length;
+  }
+
+  bool grids_accent_active() const { return grids_accent_state_; }
+  inline bool grids_hh_state() const { return grids_hh_state_; }
+  bool grids_hh_trigger() {
+    bool result = (hh_pulse_counter_ > 0);
+    if (hh_pulse_counter_ > 0) {
+        hh_pulse_counter_--;
+    }
+    return result;
+  }
+
+  bool get_hh_gate(size_t i) const { return hh_gate_buffer_[i]; }
+  bool get_accent_gate(size_t i) const { return accent_gate_buffer_[i]; }
+
   
  private:
   union RandomVector {
@@ -153,7 +189,7 @@ class TGenerator {
   void ConfigureSlaveRamps(const RandomVector& v);
   int GenerateComplementaryBernoulli(const RandomVector& v);
   int GenerateIndependentBernoulli(const RandomVector& v);
-  int GenerateThreeStates(const RandomVector& v);
+  int GenerateGrids(const RandomVector& x);
   int GenerateDrums(const RandomVector& v);
   int GenerateMarkov(const RandomVector& v);
   void ScheduleOutputPulses(const RandomVector& v, int bitmask);
@@ -185,6 +221,23 @@ class TGenerator {
   float jitter_multiplier_;
   float phase_difference_;
   float previous_external_ramp_value_;
+
+  grids::PatternGenerator grids_;
+  
+  float grids_x_, grids_y_, grids_chaos_;
+  float dens_kick_, dens_snare_, dens_hh_;
+  int grids_length_;
+  bool grids_accent_state_;
+  bool grids_hh_state_;
+  bool hh_trigger_;
+  bool prev_hh_state_;
+  int hh_pulse_counter_;
+  float current_period_;
+
+  int hh_pulse_length_;
+  bool hh_gate_buffer_[kBlockSize];
+  bool accent_gate_buffer_[kBlockSize];
+  size_t sample_index_;
   
   bool use_external_clock_;
 

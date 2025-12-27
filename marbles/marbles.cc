@@ -63,6 +63,9 @@ const bool test_adc_noise = false;
 const int kSampleRate = 32000;
 const int kGateDelay = 2;
 
+float grids_chaos = 0.0f;
+int grids_length_ = 32;
+
 ClockInputs clock_inputs;
 ClockSelfPatchingDetector self_patching_detector[kNumGateOutputs];
 CvReader cv_reader;
@@ -238,9 +241,35 @@ void Process(IOBuffer::Block* block, size_t size) {
       &block->adc_value[0],
       parameters,
       hidden_gates);
-  
+
+  const State& state = settings.state();
+
+  bool grids_mode = (state.t_model == T_GENERATOR_MODEL_GRIDS);
   float deja_vu = parameters[ADC_CHANNEL_DEJA_VU_AMOUNT];
-  
+
+  uint8_t t_deja_vu_state = state.t_deja_vu;
+  uint8_t x_deja_vu_state = state.x_deja_vu;
+
+  if (grids_mode && (settings.deja_vu_t_cv_swap() || settings.deja_vu_x_cv_swap())) {
+    bool gate_high = hidden_gates[ADC_CHANNEL_DEJA_VU_AMOUNT] & GATE_FLAG_HIGH;
+
+    if (settings.deja_vu_t_cv_swap() && gate_high) {
+      if (state.t_deja_vu == DEJA_VU_ON || state.t_deja_vu == DEJA_VU_LOCKED) {
+        t_deja_vu_state = DEJA_VU_OFF;
+      } else {
+        t_deja_vu_state = DEJA_VU_ON;
+      }
+    }
+    if (settings.deja_vu_x_cv_swap() && gate_high) {
+      if (state.x_deja_vu == DEJA_VU_ON || state.x_deja_vu == DEJA_VU_LOCKED) {
+        x_deja_vu_state = DEJA_VU_OFF;
+      } else {
+        x_deja_vu_state = DEJA_VU_ON;
+      }
+    }
+  }
+
+
   //  Deadband near 12 o'clock for the deja vu parameter.
   const float d = fabsf(deja_vu - 0.5f);
   if (d > 0.03f) {
@@ -278,24 +307,98 @@ void Process(IOBuffer::Block* block, size_t size) {
   ramps.external = &ramp_buffer[kBlockSize];
   ramps.slave[0] = &ramp_buffer[kBlockSize * 2];
   ramps.slave[1] = &ramp_buffer[kBlockSize * 3];
-  
-  const State& state = settings.state();
+
   int deja_vu_length = deja_vu_length_quantizer.Lookup(
       loop_length,
       parameters[ADC_CHANNEL_DEJA_VU_LENGTH]);
   
-  bool t_section_reset = settings.explicit_reset() && \
+
+  // Disable if grids_y_cv_swap == 2 (jitter CV goes to map Y)
+  bool t_reset_cv_available = !(grids_mode && settings.grids_y_cv_swap() == 2);
+  bool t_section_reset = settings.explicit_reset() && t_reset_cv_available &&
       hidden_gates[ADC_CHANNEL_T_JITTER] & GATE_FLAG_RISING;
   
   t_generator.set_model(TGeneratorModel(state.t_model));
   t_generator.set_range(TGeneratorRange(state.t_range));
-  t_generator.set_rate(parameters[ADC_CHANNEL_T_RATE]);
-  t_generator.set_bias(parameters[ADC_CHANNEL_T_BIAS]);
-  t_generator.set_jitter(parameters[ADC_CHANNEL_T_JITTER]);
-  t_generator.set_deja_vu(
-      state.t_deja_vu == DEJA_VU_LOCKED
-          ? 0.5f
-          : (state.t_deja_vu == DEJA_VU_ON ? deja_vu : 0.0f));
+  
+  float k_bias_t = parameters[ADC_CHANNEL_T_BIAS];
+  float k_jitter = parameters[ADC_CHANNEL_T_JITTER];
+
+  if (grids_mode) {
+    t_generator.set_rate(static_cast<float>(state.t_rate_stored) / 255.0f);
+    float final_x = static_cast<float>(state.grids_x) / 255.0f;
+    float final_y = static_cast<float>(state.grids_y) / 255.0f;
+    float final_chaos = static_cast<float>(state.grids_chaos) / 255.0f;
+    
+    // Map X CV: 0=off, 1=steps, 2=t_bias
+    if (settings.grids_x_cv_swap() == 1) {
+        final_x += cv_reader.channel(ADC_CHANNEL_X_STEPS).scaled_raw_cv();
+        CONSTRAIN(final_x, 0.0f, 1.0f);
+    } else if (settings.grids_x_cv_swap() == 2) {
+        final_x += cv_reader.channel(ADC_CHANNEL_T_BIAS).scaled_raw_cv();
+        CONSTRAIN(final_x, 0.0f, 1.0f);
+    }
+
+    // Map Y CV: 0=off, 1=x_bias, 2=jitter
+    if (settings.grids_y_cv_swap() == 1) {
+        final_y += cv_reader.channel(ADC_CHANNEL_X_BIAS).scaled_raw_cv();
+        CONSTRAIN(final_y, 0.0f, 1.0f);
+    } else if (settings.grids_y_cv_swap() == 2) {
+        final_y += cv_reader.channel(ADC_CHANNEL_T_JITTER).scaled_raw_cv();
+        CONSTRAIN(final_y, 0.0f, 1.0f);
+    }
+
+    // Chaos CV: 0=off, 1=spread, 2=rate
+    if (settings.grids_chaos_cv_swap() == 1 && !state.x_register_mode) {
+        final_chaos += cv_reader.channel(ADC_CHANNEL_X_SPREAD).scaled_raw_cv();
+        CONSTRAIN(final_chaos, 0.0f, 1.0f);
+    } else if (settings.grids_chaos_cv_swap() == 2) {
+        final_chaos += cv_reader.channel(ADC_CHANNEL_T_RATE).scaled_raw_cv();
+        CONSTRAIN(final_chaos, 0.0f, 1.0f);
+    }
+
+    t_generator.set_grids_coordinates(final_x, final_y, final_chaos);
+
+    float hh_density = cv_reader.channel(ADC_CHANNEL_T_RATE).unscaled_pot();
+    if (settings.grids_chaos_cv_swap() != 2) {
+        hh_density += cv_reader.channel(ADC_CHANNEL_T_RATE).scaled_raw_cv();
+    }
+    CONSTRAIN(hh_density, 0.0f, 1.0f);
+
+    float kick_density;
+    if (settings.grids_x_cv_swap() == 2) {
+        kick_density = cv_reader.channel(ADC_CHANNEL_T_BIAS).unscaled_pot();
+    } else {
+        kick_density = parameters[ADC_CHANNEL_T_BIAS];
+    }
+
+    float snare_density;
+    if (settings.grids_y_cv_swap() == 2) {
+        snare_density = cv_reader.channel(ADC_CHANNEL_T_JITTER).unscaled_pot();
+    } else {
+        snare_density = parameters[ADC_CHANNEL_T_JITTER];
+    }
+
+    t_generator.set_grids_densities(
+      kick_density, 
+      snare_density, 
+      hh_density
+    );
+      
+    if(t_deja_vu_state == DEJA_VU_ON || t_deja_vu_state == DEJA_VU_LOCKED) {
+      t_generator.set_grids_length(deja_vu_length);
+    } else {
+      t_generator.set_grids_length(grids_length_);
+    }
+  } else {
+    // Marbles modes
+    float k_rate = parameters[ADC_CHANNEL_T_RATE];
+    t_generator.set_rate(k_rate);
+    t_generator.set_bias(k_bias_t);
+    t_generator.set_jitter(k_jitter);
+  }
+
+  t_generator.set_deja_vu(t_deja_vu_state == DEJA_VU_LOCKED ? 0.5f : (t_deja_vu_state == DEJA_VU_ON ? deja_vu : 0.0f));
   t_generator.set_length(deja_vu_length);
   t_generator.set_pulse_width_mean(float(state.t_pulse_width_mean) / 256.0f);
   t_generator.set_pulse_width_std(float(state.t_pulse_width_std) / 256.0f);
@@ -312,7 +415,7 @@ void Process(IOBuffer::Block* block, size_t size) {
   float note_cv_2 = cv_reader.channel(ADC_CHANNEL_X_SPREAD_2).scaled_raw_cv();
   float note_cv = 0.5f * (note_cv_1 + note_cv_2);
   float u = note_filter.Process(0.5f * (note_cv + 1.0f));
-  
+
   if (test_adc_noise) {
     static float note_lp = 0.0f;
     float note = note_cv_1;
@@ -343,13 +446,30 @@ void Process(IOBuffer::Block* block, size_t size) {
     x.register_value = u;
     cv_reader.set_attenuverter(
         ADC_CHANNEL_X_SPREAD, state.x_register_mode ? 0.5f : 1.0f);
-  
-    x.spread = parameters[ADC_CHANNEL_X_SPREAD];
-    x.bias = parameters[ADC_CHANNEL_X_BIAS];
-    x.steps = parameters[ADC_CHANNEL_X_STEPS];
-    x.deja_vu = state.x_deja_vu == DEJA_VU_LOCKED
+
+    // Check if CV is swapped to grids - if so, use pot only
+    if (grids_mode && settings.grids_chaos_cv_swap() == 1) {
+        x.spread = cv_reader.channel(ADC_CHANNEL_X_SPREAD).unscaled_pot();
+    } else {
+        x.spread = parameters[ADC_CHANNEL_X_SPREAD];
+    }
+
+    if (grids_mode && settings.grids_y_cv_swap() == 1) {
+        x.bias = cv_reader.channel(ADC_CHANNEL_X_BIAS).unscaled_pot();
+    } else {
+        x.bias = parameters[ADC_CHANNEL_X_BIAS];
+    }
+
+    if (grids_mode && settings.grids_x_cv_swap() == 1) {
+        x.steps = cv_reader.channel(ADC_CHANNEL_X_STEPS).unscaled_pot();
+    } else {
+        x.steps = parameters[ADC_CHANNEL_X_STEPS];
+    }
+
+    x.deja_vu = x_deja_vu_state == DEJA_VU_LOCKED
         ? 0.5f
-        : (state.x_deja_vu == DEJA_VU_ON ? deja_vu : 0.0f);
+        : (x_deja_vu_state == DEJA_VU_ON ? deja_vu : 0.0f);
+
     x.length = deja_vu_length;
     x.ratio.p = 1;
     x.ratio.q = 1;
@@ -374,8 +494,9 @@ void Process(IOBuffer::Block* block, size_t size) {
     
     y.scale_index = x.scale_index = state.x_scale;
     
-    bool x_section_reset = settings.explicit_reset() && \
-        hidden_gates[ADC_CHANNEL_X_STEPS] & GATE_FLAG_RISING;
+    bool x_reset_cv_available = !(grids_mode && settings.grids_x_cv_swap() == 1);
+    bool x_section_reset = settings.explicit_reset() && x_reset_cv_available &&
+      hidden_gates[ADC_CHANNEL_X_STEPS] & GATE_FLAG_RISING;
     if (xy_clock_source != CLOCK_SOURCE_EXTERNAL) {
       x_section_reset |= t_section_reset;
     }
@@ -393,15 +514,36 @@ void Process(IOBuffer::Block* block, size_t size) {
   
   const float* v = voltages;
   const bool* g = gates;
+  
   for (size_t i = 0; i < size; ++i) {
-    //block->cv_output[1][i] = DacCode(1, SineOscillator(*v++));
-    block->cv_output[1][i] = DacCode(1, *v++);
-    block->cv_output[2][i] = DacCode(2, *v++);
-    block->cv_output[3][i] = DacCode(3, *v++);
-    block->cv_output[0][i] = DacCode(0, *v++);
-    block->gate_output[0][i + kGateDelay] = *g++;
-    block->gate_output[1][i + kGateDelay] = ramps.master[i] < 0.5f;
-    block->gate_output[2][i + kGateDelay] = *g++;
+    float val_x1 = *v++; 
+    float val_x2 = *v++;
+    float val_x3 = *v++; 
+    float val_y  = *v++;
+
+    block->cv_output[1][i] = DacCode(1, val_x1); // X1
+    block->cv_output[2][i] = DacCode(2, val_x2); // X2
+    block->cv_output[3][i] = DacCode(3, val_x3); // X3
+    
+    // Y Output (or Grids Accent Output)
+    if (grids_mode) {
+      block->cv_output[0][i] = t_generator.grids_accent_active() ? 0 : 32768;
+    } else {
+      block->cv_output[0][i] = DacCode(0, val_y);
+    }
+
+    // T1 and T3 Gates
+    bool gate_t1 = *g++;
+    bool gate_t3 = *g++;
+    
+    block->gate_output[0][i + kGateDelay] = gate_t1;
+    block->gate_output[2][i + kGateDelay] = gate_t3;
+
+    if (grids_mode) {
+      block->gate_output[1][i + kGateDelay] = t_generator.get_hh_gate(i);
+    } else {
+      block->gate_output[1][i + kGateDelay] = (ramps.master[i] < 0.5f);
+    }
   }
   
   for (size_t i = 0; i < kNumGateOutputs; ++i) {
@@ -410,7 +552,7 @@ void Process(IOBuffer::Block* block, size_t size) {
       gate_delay_tail[i][j] = block->gate_output[i][size + j];
     }
   }
-  
+
   if (PROFILE_RENDER) {
     TOC;
   }
