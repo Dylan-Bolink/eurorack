@@ -43,8 +43,9 @@ PACKAGES       = marbles \
 		marbles/random \
 		stmlib/dsp \
 		stmlib/utils \
-		stmlib/system
-RESOURCES      = marbles/resources
+		stmlib/system \
+		grids
+# RESOURCES      = marbles/resources
 
 TOOLCHAIN_PATH ?= /usr/local/arm-4.8.3/
 

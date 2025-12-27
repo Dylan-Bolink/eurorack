@@ -27,6 +27,7 @@
 // User interface.
 
 #include "marbles/ui.h"
+#include "marbles/random/t_generator.h"
 
 #include <algorithm>
 
@@ -53,6 +54,7 @@ const LedColor Ui::palette_[4] = {
 
 /* static */
 AlternateKnobMapping Ui::alternate_knob_mappings_[ADC_CHANNEL_LAST];
+static uint8_t prev_t_model = 255;
 
 void Ui::Init(
     Settings* settings,
@@ -74,14 +76,19 @@ void Ui::Init(
   State* state = settings_->mutable_state();
   alternate_knob_mappings_[ADC_CHANNEL_T_BIAS].unlock_switch = SWITCH_T_MODEL;
   alternate_knob_mappings_[ADC_CHANNEL_T_BIAS].destination = &state->t_pulse_width_mean;
+
   alternate_knob_mappings_[ADC_CHANNEL_T_JITTER].unlock_switch = SWITCH_T_MODEL;
   alternate_knob_mappings_[ADC_CHANNEL_T_JITTER].destination = &state->t_pulse_width_std;
+
   alternate_knob_mappings_[ADC_CHANNEL_T_RATE].unlock_switch = SWITCH_X_MODE;
   alternate_knob_mappings_[ADC_CHANNEL_T_RATE].destination = &state->y_divider;
+
   alternate_knob_mappings_[ADC_CHANNEL_X_SPREAD].unlock_switch = SWITCH_X_MODE;
   alternate_knob_mappings_[ADC_CHANNEL_X_SPREAD].destination = &state->y_spread;
+
   alternate_knob_mappings_[ADC_CHANNEL_X_BIAS].unlock_switch = SWITCH_X_MODE;
   alternate_knob_mappings_[ADC_CHANNEL_X_BIAS].destination = &state->y_bias;
+
   alternate_knob_mappings_[ADC_CHANNEL_X_STEPS].unlock_switch = SWITCH_X_MODE;
   alternate_knob_mappings_[ADC_CHANNEL_X_STEPS].destination = &state->y_steps;
   
@@ -112,6 +119,28 @@ void Ui::Poll() {
   // 1kHz.
   system_clock.Tick();
   switches_.Debounce();
+
+  State* s = settings_->mutable_state();
+
+  if (s->t_model == marbles::T_GENERATOR_MODEL_GRIDS && prev_t_model != marbles::T_GENERATOR_MODEL_GRIDS) {
+    // Just entered Grids mode - capture current rate knob position
+    s->t_rate_stored = static_cast<uint8_t>(cv_reader_->channel(ADC_CHANNEL_T_RATE).unscaled_pot() * 255.0f);
+  }
+  prev_t_model = s->t_model;
+  
+  if (s->t_model == marbles::T_GENERATOR_MODEL_GRIDS) {
+    // GRIDS MODE: Remap Shift-Knobs to Grids Variables
+    alternate_knob_mappings_[ADC_CHANNEL_X_STEPS].destination = &s->grids_x;
+    alternate_knob_mappings_[ADC_CHANNEL_X_BIAS].destination  = &s->grids_y;
+    alternate_knob_mappings_[ADC_CHANNEL_X_SPREAD].destination = &s->grids_chaos;
+    alternate_knob_mappings_[ADC_CHANNEL_T_RATE].destination   = &s->t_rate_stored;
+  } else {
+    // STANDARD MODE: Restore Original Mappings
+    alternate_knob_mappings_[ADC_CHANNEL_X_STEPS].destination = &s->y_steps;
+    alternate_knob_mappings_[ADC_CHANNEL_X_BIAS].destination  = &s->y_bias;
+    alternate_knob_mappings_[ADC_CHANNEL_X_SPREAD].destination = &s->y_spread;
+    alternate_knob_mappings_[ADC_CHANNEL_T_RATE].destination = &s->y_divider;
+  }
   
   for (int i = 0; i < SWITCH_LAST; ++i) {
     if (switches_.just_pressed(Switch(i))) {
@@ -213,27 +242,90 @@ void Ui::UpdateLEDs() {
     case UI_MODE_NORMAL:
     case UI_MODE_RECORD_SCALE:
       {
-        leds_.set(LED_T_MODEL, MakeColor(state.t_model, cb));
-        leds_.set(LED_T_RANGE, MakeColor(state.t_range, cb));
-        leds_.set(
-            LED_T_DEJA_VU,
-            DejaVuColor(DejaVuState(state.t_deja_vu), deja_vu_lock_));
-        
-        leds_.set(LED_X_CONTROL_MODE, MakeColor(state.x_control_mode, cb));
-        leds_.set(
-            LED_X_DEJA_VU,
-            DejaVuColor(DejaVuState(state.x_deja_vu), deja_vu_lock_));
-        
-        if (mode_ == UI_MODE_NORMAL) {
-          leds_.set(LED_X_RANGE,
-                    state.x_register_mode
-                        ? LED_COLOR_OFF
-                        : MakeColor(state.x_range, cb));
-          leds_.set(LED_X_EXT,
-                    state.x_register_mode ? LED_COLOR_GREEN : LED_COLOR_OFF);
+        if (settings_->state().t_model == T_GENERATOR_MODEL_GRIDS && 
+            switches_.pressed(SWITCH_X_MODE)) {
+
+          bool fast_blink = (system_clock.milliseconds() & 127) > 64;
+
+          // Map X: off=off, 1=green (steps), 2=yellow (t_bias)
+          LedColor x_color = LED_COLOR_OFF;
+          if (state.grids_x_cv_swap == 1) x_color = LED_COLOR_GREEN;
+          else if (state.grids_x_cv_swap == 2) x_color = fast_blink ? LED_COLOR_GREEN : LED_COLOR_OFF;
+          leds_.set(LED_T_RANGE, x_color);
+
+          // Chaos: off=off, 1=green (spread), 2=yellow (rate)
+          LedColor chaos_color = LED_COLOR_OFF;
+          if (state.grids_chaos_cv_swap == 1) chaos_color = LED_COLOR_GREEN;
+          else if (state.grids_chaos_cv_swap == 2) chaos_color = fast_blink ? LED_COLOR_GREEN : LED_COLOR_OFF;
+          leds_.set(LED_X_EXT, chaos_color);
+
+          // Map Y: off=off, 1=green (x_bias), 2=yellow (jitter)
+          LedColor y_color = LED_COLOR_OFF;
+          if (state.grids_y_cv_swap == 1) y_color = LED_COLOR_GREEN;
+          else if (state.grids_y_cv_swap == 2) y_color = fast_blink ? LED_COLOR_GREEN : LED_COLOR_OFF;
+          leds_.set(LED_X_RANGE, y_color);
+
+          LedColor reset_active = LED_COLOR_OFF;
+          if (state.explicit_reset) reset_active = LED_COLOR_YELLOW;
+          leds_.set(LED_T_MODEL, reset_active);
+
+          // T deja vu lock CV swap
+          LedColor t_dv_color = LED_COLOR_OFF;
+          if (state.deja_vu_t_cv_swap) t_dv_color = LED_COLOR_GREEN;
+          leds_.set(LED_T_DEJA_VU, t_dv_color);
+
+          // X deja vu lock CV swap
+          LedColor x_dv_color = LED_COLOR_OFF;
+          if (state.deja_vu_x_cv_swap) x_dv_color = LED_COLOR_GREEN;
+          leds_.set(LED_X_DEJA_VU, x_dv_color);
+
         } else {
-          leds_.set(LED_X_RANGE, scale_color);
-          leds_.set(LED_X_EXT, LED_COLOR_GREEN);
+          leds_.set(LED_T_RANGE, MakeColor(state.t_range, cb));
+          if (mode_ == UI_MODE_NORMAL) {
+            leds_.set(LED_X_RANGE,
+                      state.x_register_mode
+                          ? LED_COLOR_OFF
+                          : MakeColor(state.x_range, cb));
+            leds_.set(LED_X_EXT,
+                      state.x_register_mode ? LED_COLOR_GREEN : LED_COLOR_OFF);
+          } else {
+            leds_.set(LED_X_RANGE, scale_color);
+            leds_.set(LED_X_EXT, LED_COLOR_GREEN);
+          }
+
+          leds_.set(LED_T_MODEL, MakeColor(state.t_model, cb));
+        
+          leds_.set(LED_X_CONTROL_MODE, MakeColor(state.x_control_mode, cb));
+
+          DejaVuState t_dv_display = DejaVuState(state.t_deja_vu);
+          if (settings_->state().t_model == T_GENERATOR_MODEL_GRIDS && 
+              state.deja_vu_t_cv_swap) {
+            float gate_cv = cv_reader_->channel(ADC_CHANNEL_DEJA_VU_AMOUNT).scaled_raw_cv();
+            bool gate_high = (gate_cv > 0.5f);
+            if (gate_high) {
+                if (state.t_deja_vu == DEJA_VU_ON || state.t_deja_vu == DEJA_VU_LOCKED) {
+                    t_dv_display = DEJA_VU_OFF;
+                } else {
+                    t_dv_display = DEJA_VU_ON;
+                }
+            }
+          }
+          leds_.set(LED_T_DEJA_VU, DejaVuColor(t_dv_display, deja_vu_lock_));
+
+          DejaVuState x_dv_display = DejaVuState(state.x_deja_vu);
+          if (settings_->state().t_model == T_GENERATOR_MODEL_GRIDS && 
+              state.deja_vu_x_cv_swap) {
+              float gate_cv = cv_reader_->channel(ADC_CHANNEL_DEJA_VU_AMOUNT).scaled_raw_cv();
+              bool gate_high = (gate_cv > 0.5f);
+              if (gate_high) {
+                if (state.x_deja_vu == DEJA_VU_ON || state.x_deja_vu == DEJA_VU_LOCKED) {
+                    x_dv_display = DEJA_VU_OFF;
+                } else {
+                    x_dv_display = DEJA_VU_ON;
+                }
+            }
+          }
+          leds_.set(LED_X_DEJA_VU, DejaVuColor(x_dv_display, deja_vu_lock_));
         }
       }
       break;
@@ -301,6 +393,51 @@ void Ui::OnSwitchReleased(const Event& e) {
   }
   
   State* state = settings_->mutable_state();
+
+  if (state->t_model == T_GENERATOR_MODEL_GRIDS) {
+    if ((e.control_id == SWITCH_T_RANGE && switches_.pressed(SWITCH_X_MODE)) ||
+        (e.control_id == SWITCH_X_MODE && switches_.pressed(SWITCH_T_RANGE))) {
+      ignore_release_[SWITCH_X_MODE] = ignore_release_[SWITCH_T_RANGE] = true;
+      state->grids_x_cv_swap = (state->grids_x_cv_swap + 1) % 3;
+      SaveState();
+      return;
+    }
+
+    if ((e.control_id == SWITCH_X_EXT && switches_.pressed(SWITCH_X_MODE)) ||
+        (e.control_id == SWITCH_X_MODE && switches_.pressed(SWITCH_X_EXT))) {
+      ignore_release_[SWITCH_X_MODE] = ignore_release_[SWITCH_X_EXT] = true;
+      state->grids_chaos_cv_swap = (state->grids_chaos_cv_swap + 1) % 3;
+      SaveState();
+      return;
+    }
+
+    if ((e.control_id == SWITCH_X_RANGE && switches_.pressed(SWITCH_X_MODE)) ||
+        (e.control_id == SWITCH_X_MODE && switches_.pressed(SWITCH_X_RANGE))) {
+      ignore_release_[SWITCH_X_MODE] = ignore_release_[SWITCH_X_RANGE] = true;
+      state->grids_y_cv_swap = (state->grids_y_cv_swap + 1) % 3;
+      SaveState();
+      return;
+    }
+
+    // T side deja vu lock CV swap
+    if ((e.control_id == SWITCH_T_DEJA_VU && switches_.pressed(SWITCH_X_MODE)) ||
+        (e.control_id == SWITCH_X_MODE && switches_.pressed(SWITCH_T_DEJA_VU))) {
+        ignore_release_[SWITCH_X_MODE] = ignore_release_[SWITCH_T_DEJA_VU] = true;
+        state->deja_vu_t_cv_swap = !state->deja_vu_t_cv_swap;
+        SaveState();
+        return;
+    }
+
+    // X side deja vu lock CV swap
+    if ((e.control_id == SWITCH_X_DEJA_VU && switches_.pressed(SWITCH_X_MODE)) ||
+        (e.control_id == SWITCH_X_MODE && switches_.pressed(SWITCH_X_DEJA_VU))) {
+        ignore_release_[SWITCH_X_MODE] = ignore_release_[SWITCH_X_DEJA_VU] = true;
+        state->deja_vu_x_cv_swap = !state->deja_vu_x_cv_swap;
+        SaveState();
+        return;
+    }
+  }
+
   if ((e.control_id == SWITCH_T_MODEL && switches_.pressed(SWITCH_X_MODE)) ||
       (e.control_id == SWITCH_X_MODE && switches_.pressed(SWITCH_T_MODEL))) {
     ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_MODE] = true;

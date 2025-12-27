@@ -80,11 +80,23 @@ struct State {
   uint8_t y_steps;
   uint8_t y_divider;
   uint8_t y_range;
-  
+
+  uint8_t grids_x;
+  uint8_t grids_y;
+  uint8_t grids_chaos;
+  uint8_t t_rate_stored;
+
+  uint8_t grids_x_cv_swap;
+  uint8_t grids_y_cv_swap;
+  uint8_t grids_chaos_cv_swap;
+
+  uint8_t deja_vu_t_cv_swap;
+  uint8_t deja_vu_x_cv_swap;
+
   uint8_t color_blind;
   uint8_t explicit_reset;
   
-  uint8_t padding[7];
+  uint8_t padding[0];
 
   enum { tag = 0x54415453 };
 };
@@ -145,7 +157,27 @@ class Settings {
   inline bool explicit_reset() const {
     return state_.explicit_reset;
   }
-  
+
+  inline uint8_t grids_x_cv_swap() const {
+    return state_.grids_x_cv_swap;
+  }
+
+  inline uint8_t grids_y_cv_swap() const {
+    return state_.grids_y_cv_swap;
+  }
+
+  inline uint8_t grids_chaos_cv_swap() const {
+    return state_.grids_chaos_cv_swap;
+  }
+
+  inline bool deja_vu_t_cv_swap() const {
+    return state_.deja_vu_t_cv_swap;
+  }
+
+  inline bool deja_vu_x_cv_swap() const {
+    return state_.deja_vu_x_cv_swap;
+  }
+
  private:
   bool freshly_baked_;
   int dirty_scale_index_;

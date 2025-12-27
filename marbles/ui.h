@@ -85,6 +85,8 @@ class Ui {
   void Poll();
   void DoEvents();
   void FlushEvents();
+
+  const Switches& switches() const { return switches_; }
   uint8_t HandleFactoryTestingRequest(uint8_t command);
   
   bool recording_scale() const {

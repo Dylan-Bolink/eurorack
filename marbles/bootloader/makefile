@@ -39,7 +39,9 @@ PACKAGES       = marbles/bootloader \
 		stm_audio_bootloader/qpsk \
 		stmlib/dsp \
 		stmlib/utils \
-		stmlib/system
+		stmlib/system \
+		grids
+
 RESOURCES      = marbles/resources
 
 TOOLCHAIN_PATH ?= /usr/local/arm-4.8.3/
