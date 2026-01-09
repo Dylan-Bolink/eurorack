@@ -144,16 +144,24 @@ void TGenerator::Init(RandomStream* random_stream, float sr) {
   dens_snare_ = 0.5f;
   dens_hh_ = 0.5f;
   grids_length_ = 32;
-  grids_accent_state_ = false;
-  grids_hh_state_ = false; 
+
+  hh_slave_ramp_.Init();
+  accent_slave_ramp_.Init();
   
   hh_trigger_ = false;
   prev_hh_state_ = false;
   current_period_ = 0.0f;
 
+  grids_swing_ = 0.0f;
+  pending_hh_from_grids_ = false;
+  pending_accent_from_grids_ = false;
 
-  hh_pulse_length_ = 0;
-  hh_pulse_counter_ = 0;
+  grids_loop_start_ = 0;
+  prev_deja_vu_active_ = false;
+  fill(&grids_step_replacement_[0], &grids_step_replacement_[32], 0xFF);
+  drift_order_head_ = 0;
+  drift_order_count_ = 0;
+
   sample_index_ = 0;
   fill(&hh_gate_buffer_[0], &hh_gate_buffer_[kBlockSize], false);
   fill(&accent_gate_buffer_[0], &accent_gate_buffer_[kBlockSize], false);
@@ -243,13 +251,65 @@ void TGenerator::ScheduleOutputPulses(const RandomVector& x, int bitmask) {
         0.5f);
     bitmask >>= 1;
   }
+
+  if (model_ == T_GENERATOR_MODEL_GRIDS) {
+    hh_slave_ramp_.Init(
+        pending_hh_from_grids_ ? 1 : 0,
+        RandomPulseWidth(0, x.variables.pulse_width[0]),
+        0.5f);
+    
+    accent_slave_ramp_.Init(
+        pending_accent_from_grids_ ? 1 : 0,
+        RandomPulseWidth(0, x.variables.pulse_width[0]),
+        0.5f);
+  }
 }
 
 int TGenerator::GenerateGrids(const RandomVector& x) {
   ++drum_pattern_step_;
   size_t len = static_cast<size_t>(grids_length_);
   if (len < 1) len = 32;
-  if (drum_pattern_step_ >= len) drum_pattern_step_ = 0;
+
+  const float kDead = 0.03f;
+  bool kick_trig = false;
+  bool snare_trig = false;
+  bool hh_trig = false;
+  bool kick_accent = false;
+  bool snare_accent = false;
+  bool hh_accent = false;
+
+  // Left loop shifting
+  bool loop_wrapped = false;
+  if (prev_deja_vu_active_ && len < 32) {
+    size_t end_point = (grids_loop_start_ + len) % 32;
+
+    if (grids_loop_start_ < end_point) {
+      if (drum_pattern_step_ >= end_point) {
+        drum_pattern_step_ = grids_loop_start_;
+        loop_wrapped = true;
+      }
+    } else {
+      if (drum_pattern_step_ >= 32) {
+        drum_pattern_step_ = 0;
+      }
+      if (drum_pattern_step_ >= end_point && drum_pattern_step_ < grids_loop_start_) {
+        drum_pattern_step_ = grids_loop_start_;
+        loop_wrapped = true;
+      }
+    }
+
+    float deja_vu_amount = sequence_.deja_vu();
+
+    // shift loop start on wraparound
+    if (loop_wrapped && deja_vu_amount < 0.47f) {
+      float shift_probability = 1.0f - deja_vu_amount / 0.47f;
+      if (x.variables.u[0] < shift_probability) {
+        grids_loop_start_ = (grids_loop_start_ + 1) % 32;
+      }
+    }
+  } else {
+    if (drum_pattern_step_ >= 32) drum_pattern_step_ = 0;
+  }
 
   uint8_t read_step = drum_pattern_step_ % 32;
   uint8_t x_u8 = static_cast<uint8_t>(grids_x_ * 255.0f);
@@ -277,44 +337,89 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
   p[1] = static_cast<uint8_t>(x.variables.u[1] * chaos_amt);
   p[2] = static_cast<uint8_t>((x.variables.u[0] + x.variables.u[1]) * 0.5f * chaos_amt);
 
-  int bitmask = 0;
-  const float kDead = 0.03f;
+
+
+  // Right density drifting
+  uint8_t step_idx = drum_pattern_step_ % 32;
+  int8_t density_drift = 0;
+
+  if (prev_deja_vu_active_ && len < 32) {
+    float deja_vu_amount = sequence_.deja_vu();
+
+    if (deja_vu_amount > 0.53f) {
+      float drift_probability = ((deja_vu_amount - 0.53f) / 0.47f) * 0.50f;
+
+      if (x.variables.u[0] < drift_probability) {
+        size_t max_drifts = len / 2;
+        if (max_drifts < 1) max_drifts = 1;
+
+        size_t drift_count = 0;
+        for (size_t i = 0; i < 32; ++i) {
+          if (grids_step_replacement_[i] != 0xFF) drift_count++;
+        }
+
+        // If at max, remove one using round-robin
+        if (drift_count >= max_drifts) {
+          for (size_t j = 0; j < 32; ++j) {
+            size_t idx = (drift_order_head_ + j) % 32;
+            if (grids_step_replacement_[idx] != 0xFF && idx != step_idx) {
+              grids_step_replacement_[idx] = 0xFF;
+              drift_order_head_ = (idx + 1) % 32;
+              break;
+            }
+          }
+        }
+
+        // Set drift range: ±126 (~50% of threshold range)
+        int8_t drift = static_cast<int8_t>((x.variables.u[1] - 0.5f) * 252.0f);
+        grids_step_replacement_[step_idx] = static_cast<uint8_t>(128 + drift);
+      }
+    }
+
+    // Apply stored drift
+    if (grids_step_replacement_[step_idx] != 0xFF) {
+      density_drift = static_cast<int8_t>(grids_step_replacement_[step_idx]) - 128;
+    }
+  }
 
   if (dens_kick_ > kDead) {
-      uint8_t lvl = result.bd;
-      if (lvl < (255 - p[0])) lvl += p[0]; else lvl = 255;
-      uint8_t thresh = static_cast<uint8_t>((1.0f - dens_kick_) * 255.0f);
-      if (lvl > thresh) bitmask |= 1;
+    uint8_t lvl = result.bd;
+    if (lvl < (255 - p[0])) lvl += p[0]; else lvl = 255;
+    int thresh_i = static_cast<int>((1.0f - dens_kick_) * 255.0f) + density_drift;
+    if (thresh_i < 0) thresh_i = 0;
+    if (thresh_i > 255) thresh_i = 255;
+    kick_trig = (lvl > thresh_i);
+    kick_accent = kick_trig && (lvl > 192);
   }
 
   if (dens_snare_ > kDead) {
-      uint8_t lvl = result.sd;
-      if (lvl < (255 - p[1])) lvl += p[1]; else lvl = 255;
-      
-      uint8_t thresh = static_cast<uint8_t>((1.0f - dens_snare_) * 255.0f);
-      if (lvl > thresh) bitmask |= (1 << 1);
+    uint8_t lvl = result.sd;
+    if (lvl < (255 - p[1])) lvl += p[1]; else lvl = 255;
+    int thresh_i = static_cast<int>((1.0f - dens_snare_) * 255.0f) + density_drift;
+    if (thresh_i < 0) thresh_i = 0;
+    if (thresh_i > 255) thresh_i = 255;
+    snare_trig = (lvl > thresh_i);
+    snare_accent = snare_trig && (lvl > 192);
   }
 
   if (dens_hh_ > kDead) {
     uint8_t lvl = result.hh;
     if (lvl < (255 - p[2])) lvl += p[2]; else lvl = 255;
-
-    uint8_t thresh = static_cast<uint8_t>((1.0f - dens_hh_) * 255.0f);
-    bool trigger = (lvl > thresh);
-    
-    if (trigger) {
-        float pulse_width = 0.05f + 0.9f * pulse_width_mean_;
-        hh_pulse_length_ = static_cast<int>(current_period_ * pulse_width);
-        if (hh_pulse_length_ < 1) hh_pulse_length_ = 1;
-        hh_pulse_counter_ = hh_pulse_length_;
-    }
-    
-    grids_hh_state_ = trigger;
-  } else {
-      grids_hh_state_ = false;
+    int thresh_i = static_cast<int>((1.0f - dens_hh_) * 255.0f) + density_drift;
+    if (thresh_i < 0) thresh_i = 0;
+    if (thresh_i > 255) thresh_i = 255;
+    hh_trig = (lvl > thresh_i);
+    hh_accent = hh_trig && (lvl > 192);
   }
 
-  grids_accent_state_ = (result.accent > 0);
+  int bitmask = 0;
+  if (kick_trig) bitmask |= 1;
+  if (snare_trig) bitmask |= 2;
+  bool combined_accent = kick_accent || snare_accent || hh_accent;
+
+  pending_hh_from_grids_ = hh_trig;
+  pending_accent_from_grids_ = combined_accent;
+
   return bitmask;
 }
 
@@ -376,8 +481,12 @@ void TGenerator::Process(bool use_external_clock, bool* reset, const GateFlags* 
   use_external_clock_ = use_external_clock;
   if (*reset) {
       for (size_t i = 0; i < kNumTChannels; ++i) slave_ramp_[i].Reset();
+      hh_slave_ramp_.Reset();
+      accent_slave_ramp_.Reset(); 
       sequence_.Reset();
-      drum_pattern_step_ = 0; // CRITICAL RESET
+      drum_pattern_step_ = 0;
+      grids_loop_start_ = 0;
+
       if (model_ != T_GENERATOR_MODEL_DIVIDER) {
           RandomVector rv;
           sequence_.NextVector(rv.x, sizeof(rv.x) / sizeof(float));
@@ -386,65 +495,74 @@ void TGenerator::Process(bool use_external_clock, bool* reset, const GateFlags* 
   }
   
   while (size--) {
-      float frequency = use_external_clock ? *ramps.external - previous_external_ramp_value_ : internal_frequency;
-      frequency += frequency < 0.0f ? 1.0f : 0.0f;
-      float j_mult = (model_ == T_GENERATOR_MODEL_GRIDS) ? 1.0f : jitter_multiplier_;
-      float jittery_freq = frequency * j_mult;
-      master_phase_ += jittery_freq;
+    float frequency = use_external_clock ? *ramps.external - previous_external_ramp_value_ : internal_frequency;
+    frequency += frequency < 0.0f ? 1.0f : 0.0f;
+    float j_mult = (model_ == T_GENERATOR_MODEL_GRIDS) ? 1.0f : jitter_multiplier_;
+    float jittery_freq = frequency * j_mult;
+    master_phase_ += jittery_freq;
 
-      if (frequency > 0.0f) {
-        current_period_ = 1.0f / frequency;
-      }
-      
-      if (master_phase_ > 1.0f) {
-          master_phase_ -= 1.0f;
-          RandomVector rv;
-          sequence_.NextVector(rv.x, sizeof(rv.x) / sizeof(float));
-          
-          float jitter_amount = jitter_ * jitter_ * jitter_ * jitter_ * 36.0f;
-          float x = FastBetaDistributionSample(rv.variables.jitter);
-          float mult = SemitonesToRatio((x * 2.0f - 1.0f) * jitter_amount);
-          mult *= (phase_difference_ > 0.0f) ? (1.0f + phase_difference_) : (1.0f / (1.0f - phase_difference_));
-          jitter_multiplier_ = mult;
-          
-          ConfigureSlaveRamps(rv);
-      }
-      if (internal_frequency) *ramps.external = master_phase_;
-      previous_external_ramp_value_ = *ramps.external;
-      ramps.external++;
-
-      float output_phase = master_phase_;
-      if (model_ == T_GENERATOR_MODEL_GRIDS) {
-          hh_gate_buffer_[sample_index_] = (hh_pulse_counter_ > 0);
-          if (hh_pulse_counter_ > 0) {
-              hh_pulse_counter_--;
+    if (frequency > 0.0f) {
+      current_period_ = 1.0f / frequency;
+    }
+    
+    if (master_phase_ > 1.0f) {
+      // Calculate swing threshold
+      float swing_threshold = 1.0f;
+      if (model_ == T_GENERATOR_MODEL_GRIDS && grids_swing_ > 0.0f) {
+          size_t next_step = (drum_pattern_step_ + 1) % 32;
+          bool next_is_swung = (next_step & 2);
+          if (next_is_swung) {
+              // Delay up to 50% of step duration
+              swing_threshold = 1.0f + (grids_swing_ * 0.5f);
           }
       }
-      sample_index_++;
-
-      if (model_ == T_GENERATOR_MODEL_GRIDS) {
-          if (hh_pulse_counter_ == 0) output_phase = 0.0f;
-      }
       
-      *ramps.master++ = output_phase;
-
-      if (model_ == T_GENERATOR_MODEL_GRIDS) {
-        hh_gate_buffer_[sample_index_] = (hh_pulse_counter_ > 0);
-        if (hh_pulse_counter_ > 0) {
-            hh_pulse_counter_--;
-        }
+      if (master_phase_ >= swing_threshold) {
+        master_phase_ -= 1.0f;  // Subtract threshold, not 1.0
+        RandomVector rv;
+        sequence_.NextVector(rv.x, sizeof(rv.x) / sizeof(float));
         
-        accent_gate_buffer_[sample_index_] = grids_accent_state_;
+        float jitter_amount = jitter_ * jitter_ * jitter_ * jitter_ * 36.0f;
+        float x = FastBetaDistributionSample(rv.variables.jitter);
+        float mult = SemitonesToRatio((x * 2.0f - 1.0f) * jitter_amount);
+        mult *= (phase_difference_ > 0.0f) ? (1.0f + phase_difference_) : (1.0f / (1.0f - phase_difference_));
+        jitter_multiplier_ = mult;
+        
+        ConfigureSlaveRamps(rv);
       }
+    }
+    
+    if (internal_frequency) *ramps.external = master_phase_;
+    previous_external_ramp_value_ = *ramps.external;
+    ramps.external++;
 
-      for (size_t j = 0; j < kNumTChannels; ++j) {
-          slave_ramp_[j].Process(jittery_freq, ramps.slave[j], gate);
-          ramps.slave[j]++;
-          gate++;
+    float output_phase = master_phase_;
+    
+    *ramps.master++ = output_phase;
+
+    for (size_t j = 0; j < kNumTChannels; ++j) {
+      slave_ramp_[j].Process(jittery_freq, ramps.slave[j], gate);
+      ramps.slave[j]++;
+      gate++;
+    }
+
+    if (model_ == T_GENERATOR_MODEL_GRIDS) {
+      bool hh_gate;
+      float hh_ramp_value;
+      hh_slave_ramp_.Process(jittery_freq, &hh_ramp_value, &hh_gate);
+      hh_gate_buffer_[sample_index_] = hh_gate;
+      
+      bool accent_gate;
+      float accent_ramp_value;
+      accent_slave_ramp_.Process(jittery_freq, &accent_ramp_value, &accent_gate);
+      accent_gate_buffer_[sample_index_] = accent_gate;
+      
+      if (!hh_gate) {
+        *(ramps.master - 1) = 0.0f;
       }
+    }
 
-
-      sample_index_++;
+    sample_index_++;
   }
 }
 

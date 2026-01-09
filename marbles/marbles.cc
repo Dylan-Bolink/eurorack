@@ -218,6 +218,7 @@ float voltages[kBlockSize * 4];
 Ramps ramps;
 GroupSettings x, y;
 bool gate_delay_tail[kNumGateOutputs][kGateDelay];
+bool accent_cv_delay_tail[kGateDelay] = {false, false};
 
 float SineOscillator(float voltage) {
   static float phase = 0.0f;
@@ -325,6 +326,10 @@ void Process(IOBuffer::Block* block, size_t size) {
   float k_jitter = parameters[ADC_CHANNEL_T_JITTER];
 
   if (grids_mode) {
+    float swing = static_cast<float>(state.grids_swing) / 255.0f;
+    if (swing < 0.03f) swing = 0.0f; // deadband check
+    t_generator.set_grids_swing(swing);
+
     t_generator.set_rate(static_cast<float>(state.t_rate_stored) / 255.0f);
     float final_x = static_cast<float>(state.grids_x) / 255.0f;
     float final_y = static_cast<float>(state.grids_y) / 255.0f;
@@ -384,12 +389,16 @@ void Process(IOBuffer::Block* block, size_t size) {
       snare_density, 
       hh_density
     );
-      
-    if(t_deja_vu_state == DEJA_VU_ON || t_deja_vu_state == DEJA_VU_LOCKED) {
+
+    bool deja_vu_active = (t_deja_vu_state == DEJA_VU_ON || t_deja_vu_state == DEJA_VU_LOCKED);
+    if(deja_vu_active) {
       t_generator.set_grids_length(deja_vu_length);
     } else {
       t_generator.set_grids_length(grids_length_);
     }
+
+    t_generator.set_grids_deja_vu_active(deja_vu_active, t_section_reset);
+
   } else {
     // Marbles modes
     float k_rate = parameters[ADC_CHANNEL_T_RATE];
@@ -527,7 +536,10 @@ void Process(IOBuffer::Block* block, size_t size) {
     
     // Y Output (or Grids Accent Output)
     if (grids_mode) {
-      block->cv_output[0][i] = t_generator.grids_accent_active() ? 0 : 32768;
+      block->cv_output[0][i] = DacCode(0, accent_cv_delay_tail[0] ? 5.0f : 0.0f);
+  
+      accent_cv_delay_tail[0] = accent_cv_delay_tail[1];
+      accent_cv_delay_tail[1] = t_generator.get_accent_gate(i);
     } else {
       block->cv_output[0][i] = DacCode(0, val_y);
     }

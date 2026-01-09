@@ -21,7 +21,7 @@ When Grids mode is active, the T-section transforms into a three-voice drum trig
 | **T2** | Hi-hat trigger |
 | **T3** | Snare trigger |
 | **Y** | Accent gate (active when pattern accent is high) |
-| **X1/X2/X3** | Random voltages (**X2** still follows master clock in the current beta) |
+| **X1/X2/X3** | Random voltages |
 
 ---
 
@@ -49,6 +49,7 @@ Hold **X Mode** (N in the manual) and turn knobs to access hidden parameters:
 | **Bias (X)** | Map Y |
 | **Spread** | Chaos |
 | **Rate** | Tempo (stored on mode entry) |
+| **Jitter** | Swing |
 
 These where the old Y parameters but Y is now used as a accent output
 
@@ -78,7 +79,15 @@ The button location makes the most sense with the original marbles module where 
 
 ### Deja vu and Deja vu Lock CV Swap
 
-Locking the T side works with the grids mode. Unlocked it will play a 32 step pattern. In a locked state it will follow the deja vu length setting. Deja vu amount knob is ignored in the current revision of the firmware.
+Locking the T side works with the grids mode. Unlocked it will play a 32 step pattern. In a locked state it will follow the deja vu length setting. The start of the loop can be set to the first beat by sending a [explicit reset](https://arc.net/l/quote/tvtbrctw).<br /><br />
+
+#### Deja vu amount
+
+##### **Left side** Increase start point: 
+Creates a chance to increase the loop start step by +1 each time you pass the loop time step.
+
+##### **Right side** Density drifting: 
+Increases the chance a step gets a density knob drift. Once the Deja vu lock is turned of the density drifts will be cleared.<br /><br />
 
 While holding **X Mode** (N in the manual) and pressing the lock buttons the deja vu cv input can be repurposed:
 

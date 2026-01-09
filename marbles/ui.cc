@@ -134,6 +134,7 @@ void Ui::Poll() {
     alternate_knob_mappings_[ADC_CHANNEL_X_BIAS].destination  = &s->grids_y;
     alternate_knob_mappings_[ADC_CHANNEL_X_SPREAD].destination = &s->grids_chaos;
     alternate_knob_mappings_[ADC_CHANNEL_T_RATE].destination   = &s->t_rate_stored;
+    // swing is done in Ui::UpdateHiddenParameters()
   } else {
     // STANDARD MODE: Restore Original Mappings
     alternate_knob_mappings_[ADC_CHANNEL_X_STEPS].destination = &s->y_steps;
@@ -269,6 +270,8 @@ void Ui::UpdateLEDs() {
           if (state.explicit_reset) reset_active = LED_COLOR_YELLOW;
           leds_.set(LED_T_MODEL, reset_active);
 
+          leds_.set(LED_X_CONTROL_MODE, MakeColor(state.x_control_mode, cb));
+
           // T deja vu lock CV swap
           LedColor t_dv_color = LED_COLOR_OFF;
           if (state.deja_vu_t_cv_swap) t_dv_color = LED_COLOR_GREEN;
@@ -310,7 +313,7 @@ void Ui::UpdateLEDs() {
                 }
             }
           }
-          leds_.set(LED_T_DEJA_VU, DejaVuColor(t_dv_display, deja_vu_lock_));
+          leds_.set(LED_T_DEJA_VU, DejaVuColor(t_dv_display, deja_vu_lock_)); 
 
           DejaVuState x_dv_display = DejaVuState(state.x_deja_vu);
           if (settings_->state().t_model == T_GENERATOR_MODEL_GRIDS && 
@@ -448,17 +451,17 @@ void Ui::OnSwitchReleased(const Event& e) {
   
   switch (e.control_id) {
     case SWITCH_T_DEJA_VU:
-      if (state->t_deja_vu == DEJA_VU_OFF) {
-        state->t_deja_vu = e.data >= kLongPressDuration
-            ? DEJA_VU_LOCKED
-            : DEJA_VU_ON;
-      } else if (state->t_deja_vu == DEJA_VU_LOCKED) {
-        state->t_deja_vu = DEJA_VU_ON;
-      } else {
-        state->t_deja_vu = e.data >= kLongPressDuration
-            ? DEJA_VU_LOCKED
-            : DEJA_VU_OFF;
-      }
+        if (state->t_deja_vu == DEJA_VU_OFF) {
+          state->t_deja_vu = e.data >= kLongPressDuration
+              ? DEJA_VU_LOCKED
+              : DEJA_VU_ON;
+        } else if (state->t_deja_vu == DEJA_VU_LOCKED) {
+          state->t_deja_vu = DEJA_VU_ON;
+        } else {
+          state->t_deja_vu = e.data >= kLongPressDuration
+              ? DEJA_VU_LOCKED
+              : DEJA_VU_OFF;
+        }
       break;
 
     case SWITCH_X_DEJA_VU:
@@ -592,6 +595,8 @@ void Ui::NextCalibrationStep() {
 }
 
 void Ui::UpdateHiddenParameters() {
+  State* state = settings_->mutable_state();
+
   // Check if some pots have been moved.
   for (int i = 0; i < ADC_CHANNEL_LAST; ++i) {
     float new_value = cv_reader_->channel(i).unscaled_pot();
@@ -599,6 +604,23 @@ void Ui::UpdateHiddenParameters() {
     bool changed = fabs(new_value - old_value) >= 0.008f;
     if (changed) {
       pot_value_[i] = new_value;
+
+      if (i == ADC_CHANNEL_T_JITTER && state->t_model == T_GENERATOR_MODEL_GRIDS) {
+        if (switches_.pressed(SWITCH_X_MODE)) {
+          // X Mode + Jitter = swing
+          state->grids_swing = static_cast<uint8_t>(new_value * 255.0f);
+          cv_reader_->mutable_channel(i)->LockPot();
+          setting_modification_flag_ = true;
+          continue;
+        } else if (switches_.pressed(SWITCH_T_MODEL)) {
+          // T Model + Jitter = pulse width
+          state->t_pulse_width_std = static_cast<uint8_t>(new_value * 255.0f);
+          cv_reader_->mutable_channel(i)->LockPot();
+          setting_modification_flag_ = true;
+          continue;
+        }
+      }
+      
       AlternateKnobMapping mapping = alternate_knob_mappings_[i];
       if (switches_.pressed(mapping.unlock_switch)) {
         if (mapping.unlock_switch == SWITCH_T_RANGE && new_value < 0.1f) {
