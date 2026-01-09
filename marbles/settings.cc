@@ -203,6 +203,7 @@ void Settings::Init() {
   state_.grids_x = 0;
   state_.grids_y = 0;
   state_.grids_chaos = 0;
+  state_.grids_swing = 0;
 
   state_.grids_x_cv_swap = 0;
   state_.grids_y_cv_swap = 0;

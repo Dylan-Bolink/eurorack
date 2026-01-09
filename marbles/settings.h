@@ -89,6 +89,7 @@ struct State {
   uint8_t grids_x_cv_swap;
   uint8_t grids_y_cv_swap;
   uint8_t grids_chaos_cv_swap;
+  uint8_t grids_swing;
 
   uint8_t deja_vu_t_cv_swap;
   uint8_t deja_vu_x_cv_swap;

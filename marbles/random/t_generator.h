@@ -161,18 +161,37 @@ class TGenerator {
       grids_length_ = length;
   }
 
-  bool grids_accent_active() const { return grids_accent_state_; }
-  inline bool grids_hh_state() const { return grids_hh_state_; }
-  bool grids_hh_trigger() {
-    bool result = (hh_pulse_counter_ > 0);
-    if (hh_pulse_counter_ > 0) {
-        hh_pulse_counter_--;
-    }
-    return result;
-  }
-
   bool get_hh_gate(size_t i) const { return hh_gate_buffer_[i]; }
   bool get_accent_gate(size_t i) const { return accent_gate_buffer_[i]; }
+
+  void set_grids_swing(float swing) {
+    grids_swing_ = swing;
+  }
+
+  void set_grids_deja_vu_active(bool active, bool reset_active = false) {
+    if (active && !prev_deja_vu_active_) {
+      size_t len = static_cast<size_t>(grids_length_);
+      grids_loop_start_ = (drum_pattern_step_ + 33 - len) % 32;
+
+      // If explicit reset, start at beginning
+      if(reset_active) {
+        grids_loop_start_ = 0;
+      }
+
+      // Clear step drifts on new lock
+      for (size_t i = 0; i < 32; ++i) {
+        grids_step_replacement_[i] = 0xFF;
+      }
+      drift_order_head_ = 0;
+      drift_order_count_ = 0;
+    }
+
+    prev_deja_vu_active_ = active;
+  }
+
+  void reset_grids_loop_start() {
+    grids_loop_start_ = 0;
+  }
 
   
  private:
@@ -227,18 +246,29 @@ class TGenerator {
   float grids_x_, grids_y_, grids_chaos_;
   float dens_kick_, dens_snare_, dens_hh_;
   int grids_length_;
-  bool grids_accent_state_;
-  bool grids_hh_state_;
   bool hh_trigger_;
   bool prev_hh_state_;
-  int hh_pulse_counter_;
   float current_period_;
 
-  int hh_pulse_length_;
   bool hh_gate_buffer_[kBlockSize];
   bool accent_gate_buffer_[kBlockSize];
   size_t sample_index_;
-  
+
+  float grids_swing_;
+  bool pending_hh_from_grids_;
+  bool pending_accent_from_grids_;
+
+  SlaveRamp hh_slave_ramp_;
+  SlaveRamp accent_slave_ramp_;
+
+  size_t grids_loop_start_;
+  bool prev_deja_vu_active_;
+  uint8_t grids_step_replacement_[32];
+
+  uint8_t drift_order_[8];
+  size_t drift_order_head_;
+  size_t drift_order_count_;
+
   bool use_external_clock_;
 
   int32_t divider_pattern_length_;
