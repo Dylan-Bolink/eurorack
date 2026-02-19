@@ -48,7 +48,7 @@ typedef char     prog_char;
 
 namespace grids {
 
-// We only keep the Drum Nodes because we deleted Euclidean/UI modes
+    // We only keep the Drum Nodes because we deleted Euclidean/UI modes
 extern const uint8_t node_0[];
 extern const uint8_t node_1[];
 extern const uint8_t node_2[];
@@ -74,6 +74,56 @@ extern const uint8_t node_21[];
 extern const uint8_t node_22[];
 extern const uint8_t node_23[];
 extern const uint8_t node_24[];
+extern const uint8_t node_25[];
+extern const uint8_t node_26[];
+extern const uint8_t node_27[];
+extern const uint8_t node_28[];
+extern const uint8_t node_29[];
+extern const uint8_t node_30[];
+extern const uint8_t node_31[];
+extern const uint8_t node_32[];
+extern const uint8_t node_33[];
+extern const uint8_t node_34[];
+extern const uint8_t node_35[];
+extern const uint8_t node_36[];
+extern const uint8_t node_37[];
+extern const uint8_t node_38[];
+extern const uint8_t node_39[];
+extern const uint8_t node_40[];
+extern const uint8_t node_41[];
+extern const uint8_t node_42[];
+extern const uint8_t node_43[];
+extern const uint8_t node_44[];
+extern const uint8_t node_45[];
+extern const uint8_t node_46[];
+extern const uint8_t node_47[];
+extern const uint8_t node_48[];
+extern const uint8_t node_49[];
+extern const uint8_t node_50[];
+extern const uint8_t node_51[];
+extern const uint8_t node_52[];
+extern const uint8_t node_53[];
+extern const uint8_t node_54[];
+extern const uint8_t node_55[];
+extern const uint8_t node_56[];
+extern const uint8_t node_57[];
+extern const uint8_t node_58[];
+extern const uint8_t node_59[];
+extern const uint8_t node_60[];
+extern const uint8_t node_61[];
+extern const uint8_t node_62[];
+extern const uint8_t node_63[];
+extern const uint8_t node_64[];
+extern const uint8_t node_65[];
+extern const uint8_t node_66[];
+extern const uint8_t node_67[];
+extern const uint8_t node_68[];
+extern const uint8_t node_69[];
+extern const uint8_t node_70[];
+extern const uint8_t node_71[];
+extern const uint8_t node_72[];
+extern const uint8_t node_73[];
+extern const uint8_t node_74[];
 
 }  // namespace grids
 

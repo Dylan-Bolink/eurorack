@@ -163,10 +163,45 @@ class TGenerator {
 
   bool get_hh_gate(size_t i) const { return hh_gate_buffer_[i]; }
   bool get_accent_gate(size_t i) const { return accent_gate_buffer_[i]; }
+  float get_accent_velocity() const { return accent_velocity_; }
+  float get_random_accent_voltage() const { return random_accent_voltage_; }
+  float get_pulse_width_mean() const { return pulse_width_mean_; }
+
+  bool get_and_clear_accent_triggered() {
+    bool result = accent_triggered_;
+    accent_triggered_ = false;
+    return result;
+  }
 
   void set_grids_swing(float swing) {
     grids_swing_ = swing;
   }
+
+  void set_grids_accent_threshold(uint8_t threshold) {
+    grids_accent_threshold_ = threshold;
+  }
+
+  // 0=kick 1=hh 2=snare 3=all
+  void set_grids_accent_mode(uint8_t mode) {
+    grids_accent_mode_ = mode;
+  }
+
+  void set_grids_interpolation(bool interpolation) {
+    grids_interpolation_ = interpolation;
+  }
+
+  void set_grids_bank(uint8_t bank) {
+    grids_.SetBank(bank);
+  }
+
+  void set_grids_flam(float flam) {
+    grids_flam_ = flam;
+  }
+
+  bool get_flam_gate_t1(size_t i) const { return flam_for_t1_ && flam_gate_buffer_[i]; }
+  bool get_flam_gate_t3(size_t i) const { return !flam_for_t1_ && flam_gate_buffer_[i]; }
+  bool get_flam_duck_t1(size_t i) const { return flam_for_t1_ && flam_duck_buffer_[i]; }
+  bool get_flam_duck_t3(size_t i) const { return !flam_for_t1_ && flam_duck_buffer_[i]; }
 
   void set_grids_deja_vu_active(bool active, bool reset_active = false) {
     if (active && !prev_deja_vu_active_) {
@@ -226,7 +261,7 @@ class TGenerator {
   }
   
   float one_hertz_;
-  
+
   TGeneratorModel model_;
   TGeneratorRange range_;
   
@@ -255,8 +290,22 @@ class TGenerator {
   size_t sample_index_;
 
   float grids_swing_;
+  uint8_t grids_accent_threshold_;
+  uint8_t grids_accent_mode_;  // 0=kick, 1=hh, 2=snare, 3=all
+  bool grids_interpolation_;
+  float accent_velocity_;
+  float random_accent_voltage_;
+  float accent_voltage_buffer_[32];
   bool pending_hh_from_grids_;
   bool pending_accent_from_grids_;
+  bool accent_triggered_;
+
+  // Flam control: -1 to +1, negative = kick, positive = snare, 0 = off
+  float grids_flam_;
+  int flam_countdown_;
+  bool flam_for_t1_;  // true = kick (T1), false = snare (T3)
+  bool flam_gate_buffer_[kBlockSize];
+  bool flam_duck_buffer_[kBlockSize];  // duck (turn off) main gate before flam
 
   SlaveRamp hh_slave_ramp_;
   SlaveRamp accent_slave_ramp_;

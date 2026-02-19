@@ -40,6 +40,7 @@
 namespace marbles {
 
 const int32_t kLongPressDuration = 2000;
+const int32_t kMediumPressDuration = 1000;
 
 using namespace std;
 using namespace stmlib;
@@ -91,7 +92,13 @@ void Ui::Init(
 
   alternate_knob_mappings_[ADC_CHANNEL_X_STEPS].unlock_switch = SWITCH_X_MODE;
   alternate_knob_mappings_[ADC_CHANNEL_X_STEPS].destination = &state->y_steps;
-  
+
+  // These are only used in Grids mode
+  alternate_knob_mappings_[ADC_CHANNEL_DEJA_VU_AMOUNT].unlock_switch = SWITCH_X_MODE;
+  alternate_knob_mappings_[ADC_CHANNEL_DEJA_VU_AMOUNT].destination = NULL; 
+  alternate_knob_mappings_[ADC_CHANNEL_DEJA_VU_LENGTH].unlock_switch = SWITCH_X_MODE;
+  alternate_knob_mappings_[ADC_CHANNEL_DEJA_VU_LENGTH].destination = NULL; 
+
   setting_modification_flag_ = false;
   output_test_mode_ = false;
   
@@ -123,8 +130,10 @@ void Ui::Poll() {
   State* s = settings_->mutable_state();
 
   if (s->t_model == marbles::T_GENERATOR_MODEL_GRIDS && prev_t_model != marbles::T_GENERATOR_MODEL_GRIDS) {
-    // Just entered Grids mode - capture current rate knob position
-    s->t_rate_stored = static_cast<uint8_t>(cv_reader_->channel(ADC_CHANNEL_T_RATE).unscaled_pot() * 255.0f);
+    // Just entered Grids mode - capture current rate knob position for both tempo and HH density
+    uint8_t rate_knob = static_cast<uint8_t>(cv_reader_->channel(ADC_CHANNEL_T_RATE).unscaled_pot() * 255.0f);
+    s->t_rate_stored = rate_knob;
+    s->grids_hh_density = rate_knob;
   }
   prev_t_model = s->t_model;
   
@@ -134,6 +143,8 @@ void Ui::Poll() {
     alternate_knob_mappings_[ADC_CHANNEL_X_BIAS].destination  = &s->grids_y;
     alternate_knob_mappings_[ADC_CHANNEL_X_SPREAD].destination = &s->grids_chaos;
     alternate_knob_mappings_[ADC_CHANNEL_T_RATE].destination   = &s->t_rate_stored;
+    alternate_knob_mappings_[ADC_CHANNEL_DEJA_VU_AMOUNT].destination = &s->grids_accent_threshold;
+    alternate_knob_mappings_[ADC_CHANNEL_DEJA_VU_LENGTH].destination = &s->grids_accent_variation;
     // swing is done in Ui::UpdateHiddenParameters()
   } else {
     // STANDARD MODE: Restore Original Mappings
@@ -141,6 +152,8 @@ void Ui::Poll() {
     alternate_knob_mappings_[ADC_CHANNEL_X_BIAS].destination  = &s->y_bias;
     alternate_knob_mappings_[ADC_CHANNEL_X_SPREAD].destination = &s->y_spread;
     alternate_knob_mappings_[ADC_CHANNEL_T_RATE].destination = &s->y_divider;
+    alternate_knob_mappings_[ADC_CHANNEL_DEJA_VU_AMOUNT].destination = NULL;
+    alternate_knob_mappings_[ADC_CHANNEL_DEJA_VU_LENGTH].destination = NULL;
   }
   
   for (int i = 0; i < SWITCH_LAST; ++i) {
@@ -266,11 +279,17 @@ void Ui::UpdateLEDs() {
           else if (state.grids_y_cv_swap == 2) y_color = fast_blink ? LED_COLOR_GREEN : LED_COLOR_OFF;
           leds_.set(LED_X_RANGE, y_color);
 
-          LedColor reset_active = LED_COLOR_OFF;
-          if (state.explicit_reset) reset_active = LED_COLOR_YELLOW;
-          leds_.set(LED_T_MODEL, reset_active);
+          // T mode LED: bank color + interpolation blink
+          {
+            LedColor bank_colors[] = { LED_COLOR_GREEN, LED_COLOR_YELLOW, LED_COLOR_RED };
+            LedColor bank_color = bank_colors[state.grids_bank];
+            bool interp_blink = !state.grids_interpolation && slow_blink;
+            leds_.set(LED_T_MODEL, state.grids_interpolation ? bank_color
+                : (interp_blink ? bank_color : LED_COLOR_OFF));
+          }
 
-          leds_.set(LED_X_CONTROL_MODE, MakeColor(state.x_control_mode, cb));
+          // X mode LED: explicit reset status (yellow=ON, off=OFF)
+          leds_.set(LED_X_CONTROL_MODE, state.explicit_reset ? LED_COLOR_YELLOW : LED_COLOR_OFF);
 
           // T deja vu lock CV swap
           LedColor t_dv_color = LED_COLOR_OFF;
@@ -441,8 +460,19 @@ void Ui::OnSwitchReleased(const Event& e) {
     }
   }
 
-  if ((e.control_id == SWITCH_T_MODEL && switches_.pressed(SWITCH_X_MODE)) ||
-      (e.control_id == SWITCH_X_MODE && switches_.pressed(SWITCH_T_MODEL))) {
+  // T pressed while X held > Cycle bank
+  if (e.control_id == SWITCH_T_MODEL && switches_.pressed(SWITCH_X_MODE)) {
+    ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_MODE] = true;
+    uint8_t combined = state->grids_bank + (state->grids_interpolation ? 0 : 3);
+    combined = (combined + 1) % 6;
+    state->grids_bank = combined % 3;
+    state->grids_interpolation = (combined < 3) ? 1 : 0;
+    SaveState();
+    return;
+  }
+
+  // X pressed while T held > Toggle explicit reset
+  if (e.control_id == SWITCH_X_MODE && switches_.pressed(SWITCH_T_MODEL)) {
     ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_MODE] = true;
     state->explicit_reset = !state->explicit_reset;
     mode_ = UI_MODE_DISPLAY_RESET_MODE;
@@ -452,13 +482,13 @@ void Ui::OnSwitchReleased(const Event& e) {
   switch (e.control_id) {
     case SWITCH_T_DEJA_VU:
         if (state->t_deja_vu == DEJA_VU_OFF) {
-          state->t_deja_vu = e.data >= kLongPressDuration
+          state->t_deja_vu = e.data >= kMediumPressDuration
               ? DEJA_VU_LOCKED
               : DEJA_VU_ON;
         } else if (state->t_deja_vu == DEJA_VU_LOCKED) {
           state->t_deja_vu = DEJA_VU_ON;
         } else {
-          state->t_deja_vu = e.data >= kLongPressDuration
+          state->t_deja_vu = e.data >= kMediumPressDuration
               ? DEJA_VU_LOCKED
               : DEJA_VU_OFF;
         }
@@ -466,13 +496,13 @@ void Ui::OnSwitchReleased(const Event& e) {
 
     case SWITCH_X_DEJA_VU:
       if (state->x_deja_vu == DEJA_VU_OFF) {
-        state->x_deja_vu = e.data >= kLongPressDuration
+        state->x_deja_vu = e.data >= kMediumPressDuration
             ? DEJA_VU_LOCKED
             : DEJA_VU_ON;
       } else if (state->x_deja_vu == DEJA_VU_LOCKED) {
         state->x_deja_vu = DEJA_VU_ON;
       } else {
-        state->x_deja_vu = e.data >= kLongPressDuration
+        state->x_deja_vu = e.data >= kMediumPressDuration
             ? DEJA_VU_LOCKED
             : DEJA_VU_OFF;
       }
@@ -481,7 +511,7 @@ void Ui::OnSwitchReleased(const Event& e) {
     case SWITCH_T_MODEL:
       {
         uint8_t bank = state->t_model / 3;
-        if (e.data >= kLongPressDuration) {
+        if (e.data >= kMediumPressDuration) {
           if (!bank) {
             state->t_model += 3;
           }
@@ -615,6 +645,33 @@ void Ui::UpdateHiddenParameters() {
         } else if (switches_.pressed(SWITCH_T_MODEL)) {
           // T Model + Jitter = pulse width
           state->t_pulse_width_std = static_cast<uint8_t>(new_value * 255.0f);
+          cv_reader_->mutable_channel(i)->LockPot();
+          setting_modification_flag_ = true;
+          continue;
+        }
+      }
+
+      if (i == ADC_CHANNEL_T_BIAS && state->t_model == T_GENERATOR_MODEL_GRIDS) {
+        if (switches_.pressed(SWITCH_X_MODE)) {
+          // X Mode + Bias = flam
+          state->grids_flam = static_cast<uint8_t>(new_value * 255.0f);
+          cv_reader_->mutable_channel(i)->LockPot();
+          setting_modification_flag_ = true;
+          continue;
+        } else if (switches_.pressed(SWITCH_T_MODEL)) {
+          // T Model + Bias = pulse width mean
+          state->t_pulse_width_mean = static_cast<uint8_t>(new_value * 255.0f);
+          cv_reader_->mutable_channel(i)->LockPot();
+          setting_modification_flag_ = true;
+          continue;
+        }
+      }
+
+      // T_RATE in grids mode: normal = HH density, shift (X_MODE) = tempo
+      if (i == ADC_CHANNEL_T_RATE && state->t_model == T_GENERATOR_MODEL_GRIDS) {
+        if (!switches_.pressed(SWITCH_X_MODE)) {
+          // Normal mode: update HH density
+          state->grids_hh_density = static_cast<uint8_t>(new_value * 255.0f);
           cv_reader_->mutable_channel(i)->LockPot();
           setting_modification_flag_ = true;
           continue;

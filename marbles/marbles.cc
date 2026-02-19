@@ -219,6 +219,8 @@ Ramps ramps;
 GroupSettings x, y;
 bool gate_delay_tail[kNumGateOutputs][kGateDelay];
 bool accent_cv_delay_tail[kGateDelay] = {false, false};
+bool prev_accent_gate = false;
+float held_accent_voltage = 5.0f;
 
 float SineOscillator(float voltage) {
   static float phase = 0.0f;
@@ -326,15 +328,49 @@ void Process(IOBuffer::Block* block, size_t size) {
   float k_jitter = parameters[ADC_CHANNEL_T_JITTER];
 
   if (grids_mode) {
-    float swing = static_cast<float>(state.grids_swing) / 255.0f;
-    if (swing < 0.03f) swing = 0.0f; // deadband check
+    float swing_raw = static_cast<float>(state.grids_swing) / 255.0f;
+    float swing = (swing_raw - 0.5f) * 2.0f;
+    if (fabsf(swing) < 0.06f) swing = 0.0f; // deadband check
     t_generator.set_grids_swing(swing);
 
-    t_generator.set_rate(static_cast<float>(state.t_rate_stored) / 255.0f);
+    // left = channel select, center = all @ 192, right = lower threshold
+    uint8_t knob = state.grids_accent_threshold;
+    uint8_t accent_mode = 3;  // default: all
+    uint8_t accent_thresh = 192;
+
+    if (knob < 32) {
+      accent_mode = 0;  // kick 
+    } else if (knob < 64) {
+      accent_mode = 1;  // hh 
+    } else if (knob < 96) {
+      accent_mode = 2;  // snare 
+    } else if (knob < 160) {
+      accent_mode = 3;  // all
+    } else {
+      // lower threshold
+      accent_mode = 3;
+      int thresh = 192 - static_cast<int>(knob - 160) * 184 / 95;
+      if (thresh < 8) thresh = 8;
+      accent_thresh = static_cast<uint8_t>(thresh);
+    }
+
+    t_generator.set_grids_accent_mode(accent_mode);
+    t_generator.set_grids_accent_threshold(accent_thresh);
+    t_generator.set_grids_interpolation(state.grids_interpolation);
+    t_generator.set_grids_bank(state.grids_bank);
+
+    float flam_raw = static_cast<float>(state.grids_flam) / 255.0f;
+    float flam = (flam_raw - 0.5f) * 2.0f;
+    if (fabsf(flam) < 0.06f) flam = 0.0f;  // deadband check
+    t_generator.set_grids_flam(flam);
+
+    float rate_normalized = static_cast<float>(state.t_rate_stored) / 255.0f;
+    t_generator.set_rate(rate_normalized * 120.0f - 60.0f);
     float final_x = static_cast<float>(state.grids_x) / 255.0f;
     float final_y = static_cast<float>(state.grids_y) / 255.0f;
-    float final_chaos = static_cast<float>(state.grids_chaos) / 255.0f;
-    
+    float chaos_raw = static_cast<float>(state.grids_chaos) / 255.0f;
+    float final_chaos = (chaos_raw - 0.5f) * 2.0f;
+
     // Map X CV: 0=off, 1=steps, 2=t_bias
     if (settings.grids_x_cv_swap() == 1) {
         final_x += cv_reader.channel(ADC_CHANNEL_X_STEPS).scaled_raw_cv();
@@ -356,17 +392,20 @@ void Process(IOBuffer::Block* block, size_t size) {
     // Chaos CV: 0=off, 1=spread, 2=rate
     if (settings.grids_chaos_cv_swap() == 1 && !state.x_register_mode) {
         final_chaos += cv_reader.channel(ADC_CHANNEL_X_SPREAD).scaled_raw_cv();
-        CONSTRAIN(final_chaos, 0.0f, 1.0f);
+        CONSTRAIN(final_chaos, -1.0f, 1.0f);
     } else if (settings.grids_chaos_cv_swap() == 2) {
         final_chaos += cv_reader.channel(ADC_CHANNEL_T_RATE).scaled_raw_cv();
-        CONSTRAIN(final_chaos, 0.0f, 1.0f);
+        CONSTRAIN(final_chaos, -1.0f, 1.0f);
     }
+    if (fabsf(final_chaos) < 0.06f) final_chaos = 0.0f;
 
     t_generator.set_grids_coordinates(final_x, final_y, final_chaos);
 
-    float hh_density = cv_reader.channel(ADC_CHANNEL_T_RATE).unscaled_pot();
+    float hh_density = static_cast<float>(state.grids_hh_density) / 255.0f;
     if (settings.grids_chaos_cv_swap() != 2) {
-        hh_density += cv_reader.channel(ADC_CHANNEL_T_RATE).scaled_raw_cv();
+        float cv = cv_reader.channel(ADC_CHANNEL_T_RATE).scaled_raw_cv();
+        // a extra check for small CV noise
+        if (cv > 0.02f || cv < -0.02f) hh_density += cv;
     }
     CONSTRAIN(hh_density, 0.0f, 1.0f);
 
@@ -534,10 +573,39 @@ void Process(IOBuffer::Block* block, size_t size) {
     block->cv_output[2][i] = DacCode(2, val_x2); // X2
     block->cv_output[3][i] = DacCode(3, val_x3); // X3
     
-    // Y Output (or Grids Accent Output)
     if (grids_mode) {
-      block->cv_output[0][i] = DacCode(0, accent_cv_delay_tail[0] ? 5.0f : 0.0f);
-  
+      float accent_voltage = 0.0f;
+      bool current_accent = accent_cv_delay_tail[0];
+      uint8_t variation = state.grids_accent_variation;
+
+      if (t_generator.get_and_clear_accent_triggered()) {
+        if (variation < 120) {
+          // Left side: random window
+          float min_voltage = 5.0f * (static_cast<float>(variation) / 119.0f);
+          held_accent_voltage = min_voltage + (5.0f - min_voltage) * t_generator.get_random_accent_voltage();
+        } else if (variation > 136) {
+          // Right side: dynamic velocity
+          float knob_amount = static_cast<float>(variation - 137) / 118.0f;
+          float min_voltage = 5.0f - 3.0f * knob_amount;
+          float velocity = t_generator.get_accent_velocity();
+          held_accent_voltage = min_voltage + (5.0f - min_voltage) * velocity;
+        } else {
+          held_accent_voltage = 5.0f;
+        }
+      }
+
+      // When pulse_width > 75% AND variation is not at noon, hold accent voltage
+      float pulse_width_mean = t_generator.get_pulse_width_mean();
+      bool variation_active = (variation < 120 || variation > 136);
+      if (pulse_width_mean > 0.75f && variation_active) {
+        accent_voltage = held_accent_voltage;
+      } else if (current_accent) {
+        accent_voltage = held_accent_voltage;
+      }
+
+      prev_accent_gate = current_accent;
+      block->cv_output[0][i] = DacCode(0, accent_voltage);
+
       accent_cv_delay_tail[0] = accent_cv_delay_tail[1];
       accent_cv_delay_tail[1] = t_generator.get_accent_gate(i);
     } else {
@@ -547,14 +615,18 @@ void Process(IOBuffer::Block* block, size_t size) {
     // T1 and T3 Gates
     bool gate_t1 = *g++;
     bool gate_t3 = *g++;
-    
-    block->gate_output[0][i + kGateDelay] = gate_t1;
-    block->gate_output[2][i + kGateDelay] = gate_t3;
 
     if (grids_mode) {
+      // Duck main gate before flam, then OR with flam gate
+      bool t1_ducked = gate_t1 && !t_generator.get_flam_duck_t1(i);
+      bool t3_ducked = gate_t3 && !t_generator.get_flam_duck_t3(i);
+      block->gate_output[0][i + kGateDelay] = t1_ducked || t_generator.get_flam_gate_t1(i);
       block->gate_output[1][i + kGateDelay] = t_generator.get_hh_gate(i);
+      block->gate_output[2][i + kGateDelay] = t3_ducked || t_generator.get_flam_gate_t3(i);
     } else {
+      block->gate_output[0][i + kGateDelay] = gate_t1;
       block->gate_output[1][i + kGateDelay] = (ramps.master[i] < 0.5f);
+      block->gate_output[2][i + kGateDelay] = gate_t3;
     }
   }
   
