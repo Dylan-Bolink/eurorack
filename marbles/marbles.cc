@@ -359,10 +359,10 @@ void Process(IOBuffer::Block* block, size_t size) {
     t_generator.set_grids_interpolation(state.grids_interpolation);
     t_generator.set_grids_bank(state.grids_bank);
 
-    float flam_raw = static_cast<float>(state.grids_flam) / 255.0f;
-    float flam = (flam_raw - 0.5f) * 2.0f;
-    if (fabsf(flam) < 0.06f) flam = 0.0f;  // deadband check
-    t_generator.set_grids_flam(flam);
+    float groove_raw = static_cast<float>(state.grids_groove_offset) / 255.0f;
+    float groove = (groove_raw - 0.5f) * 2.0f;
+    if (fabsf(groove) < 0.06f) groove = 0.0f;
+    t_generator.set_grids_groove_offset(groove);
 
     float rate_normalized = static_cast<float>(state.t_rate_stored) / 255.0f;
     t_generator.set_rate(rate_normalized * 120.0f - 60.0f);
@@ -617,12 +617,9 @@ void Process(IOBuffer::Block* block, size_t size) {
     bool gate_t3 = *g++;
 
     if (grids_mode) {
-      // Duck main gate before flam, then OR with flam gate
-      bool t1_ducked = gate_t1 && !t_generator.get_flam_duck_t1(i);
-      bool t3_ducked = gate_t3 && !t_generator.get_flam_duck_t3(i);
-      block->gate_output[0][i + kGateDelay] = t1_ducked || t_generator.get_flam_gate_t1(i);
+      block->gate_output[0][i + kGateDelay] = gate_t1;
       block->gate_output[1][i + kGateDelay] = t_generator.get_hh_gate(i);
-      block->gate_output[2][i + kGateDelay] = t3_ducked || t_generator.get_flam_gate_t3(i);
+      block->gate_output[2][i + kGateDelay] = gate_t3;
     } else {
       block->gate_output[0][i + kGateDelay] = gate_t1;
       block->gate_output[1][i + kGateDelay] = (ramps.master[i] < 0.5f);

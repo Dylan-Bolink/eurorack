@@ -653,8 +653,8 @@ void Ui::UpdateHiddenParameters() {
 
       if (i == ADC_CHANNEL_T_BIAS && state->t_model == T_GENERATOR_MODEL_GRIDS) {
         if (switches_.pressed(SWITCH_X_MODE)) {
-          // X Mode + Bias = flam
-          state->grids_flam = static_cast<uint8_t>(new_value * 255.0f);
+          // X Mode + Bias = Offset
+          state->grids_groove_offset = static_cast<uint8_t>(new_value * 255.0f);
           cv_reader_->mutable_channel(i)->LockPot();
           setting_modification_flag_ = true;
           continue;

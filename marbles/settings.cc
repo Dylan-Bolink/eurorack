@@ -209,7 +209,7 @@ void Settings::Init() {
   state_.grids_hh_density = 128;
   state_.grids_accent_threshold = 128;
   state_.grids_accent_variation = 128;
-  state_.grids_flam = 128;  // center = off 
+  state_.grids_groove_offset = 128;  // center = off
 
   state_.grids_x_cv_swap = 0;
   state_.grids_y_cv_swap = 0;

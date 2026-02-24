@@ -194,14 +194,9 @@ class TGenerator {
     grids_.SetBank(bank);
   }
 
-  void set_grids_flam(float flam) {
-    grids_flam_ = flam;
+  void set_grids_groove_offset(float offset) {
+    grids_groove_offset_ = offset;
   }
-
-  bool get_flam_gate_t1(size_t i) const { return flam_for_t1_ && flam_gate_buffer_[i]; }
-  bool get_flam_gate_t3(size_t i) const { return !flam_for_t1_ && flam_gate_buffer_[i]; }
-  bool get_flam_duck_t1(size_t i) const { return flam_for_t1_ && flam_duck_buffer_[i]; }
-  bool get_flam_duck_t3(size_t i) const { return !flam_for_t1_ && flam_duck_buffer_[i]; }
 
   void set_grids_deja_vu_active(bool active, bool reset_active = false) {
     if (active && !prev_deja_vu_active_) {
@@ -300,12 +295,10 @@ class TGenerator {
   bool pending_accent_from_grids_;
   bool accent_triggered_;
 
-  // Flam control: -1 to +1, negative = kick, positive = snare, 0 = off
-  float grids_flam_;
-  int flam_countdown_;
-  bool flam_for_t1_;  // true = kick (T1), false = snare (T3)
-  bool flam_gate_buffer_[kBlockSize];
-  bool flam_duck_buffer_[kBlockSize];  // duck (turn off) main gate before flam
+  // Groove offset: -1 to +1, negative = kick delayed, positive = snare delayed
+  float grids_groove_offset_;
+  int groove_delay_countdown_;
+  bool groove_delay_for_t1_;  // true = kick (T1/slave_ramp_[0]), false = snare (T3/slave_ramp_[1])
 
   SlaveRamp hh_slave_ramp_;
   SlaveRamp accent_slave_ramp_;

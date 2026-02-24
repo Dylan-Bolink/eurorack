@@ -165,9 +165,9 @@ void TGenerator::Init(RandomStream* random_stream, float sr) {
   pending_accent_from_grids_ = false;
   accent_triggered_ = false;
 
-  grids_flam_ = 0.0f;
-  flam_countdown_ = 0;
-  flam_for_t1_ = true;
+  grids_groove_offset_ = 0.0f;
+  groove_delay_countdown_ = 0;
+  groove_delay_for_t1_ = true;
 
   grids_loop_start_ = 0;
   prev_deja_vu_active_ = false;
@@ -178,8 +178,6 @@ void TGenerator::Init(RandomStream* random_stream, float sr) {
   sample_index_ = 0;
   fill(&hh_gate_buffer_[0], &hh_gate_buffer_[kBlockSize], false);
   fill(&accent_gate_buffer_[0], &accent_gate_buffer_[kBlockSize], false);
-  fill(&flam_gate_buffer_[0], &flam_gate_buffer_[kBlockSize], false);
-  fill(&flam_duck_buffer_[0], &flam_duck_buffer_[kBlockSize], false);
 }
 
 int TGenerator::GenerateComplementaryBernoulli(const RandomVector& x) {
@@ -344,7 +342,25 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
     y_u8 = y_idx < 4 ? y_idx * 64 : 255;
   }
 
-  grids::PatternGenerator::OutputStep result = grids_.GetStep(read_step, x_u8, y_u8);
+  // Parse groove offset into step offset or micro-timing
+  int kick_step_offset = 0, snare_step_offset = 0;
+  float kick_micro = 0.0f, snare_micro = 0.0f;
+  if (grids_groove_offset_ < -0.06f) {
+    float amt = -grids_groove_offset_;
+    if (amt >= 0.87f) kick_step_offset = 3;
+    else if (amt >= 0.73f) kick_step_offset = 2;
+    else if (amt >= 0.60f) kick_step_offset = 1;
+    else kick_micro = (amt - 0.06f) / 0.54f * 0.5f;
+  } else if (grids_groove_offset_ > 0.06f) {
+    float amt = grids_groove_offset_;
+    if (amt >= 0.87f) snare_step_offset = 3;
+    else if (amt >= 0.73f) snare_step_offset = 2;
+    else if (amt >= 0.60f) snare_step_offset = 1;
+    else snare_micro = (amt - 0.06f) / 0.54f * 0.5f;
+  }
+
+  uint8_t kick_read = (read_step - kick_step_offset + 32) % 32;
+  uint8_t snare_read = (read_step - snare_step_offset + 32) % 32;
 
   uint8_t chaos_amt = (grids_chaos_ > 0.0f)
       ? static_cast<uint8_t>(grids_chaos_ * 64.0f)
@@ -400,7 +416,7 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
   uint8_t kick_lvl = 0, snare_lvl = 0, hh_lvl = 0;
 
   if (dens_kick_ > kDead) {
-    kick_lvl = result.bd;
+    kick_lvl = grids_.ReadDrumMap(kick_read, 0, x_u8, y_u8);
     if (kick_lvl < (255 - p[0])) kick_lvl += p[0]; else kick_lvl = 255;
     int thresh_i = static_cast<int>((1.0f - dens_kick_) * 255.0f) + density_drift;
     if (thresh_i < 0) thresh_i = 0;
@@ -410,7 +426,7 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
   }
 
   if (dens_snare_ > kDead) {
-    snare_lvl = result.sd;
+    snare_lvl = grids_.ReadDrumMap(snare_read, 1, x_u8, y_u8);
     if (snare_lvl < (255 - p[1])) snare_lvl += p[1]; else snare_lvl = 255;
     int thresh_i = static_cast<int>((1.0f - dens_snare_) * 255.0f) + density_drift;
     if (thresh_i < 0) thresh_i = 0;
@@ -420,7 +436,7 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
   }
 
   if (dens_hh_ > kDead) {
-    hh_lvl = result.hh;
+    hh_lvl = grids_.ReadDrumMap(read_step, 2, x_u8, y_u8);
     if (hh_lvl < (255 - p[2])) hh_lvl += p[2]; else hh_lvl = 255;
     int thresh_i = static_cast<int>((1.0f - dens_hh_) * 255.0f) + density_drift;
     if (thresh_i < 0) thresh_i = 0;
@@ -429,37 +445,46 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
     hh_accent = hh_trig && (hh_lvl > grids_accent_threshold_);
   }
 
-  // Flam scheduling
-  const float kFlamDead = 0.03f;  // deadzone for flam knob
-  if (grids_flam_ < -kFlamDead && kick_trig) {
-    // Left side: kick flams
-    float flam_amount = -grids_flam_;  // 0 to 1
-    float flam_prob = flam_amount * (static_cast<float>(kick_lvl) / 255.0f);
-    if (kick_accent) flam_prob += 0.15f;  // accent bonus
-    if (x.variables.u[0] < flam_prob) {
-      flam_for_t1_ = true;
-      // Gap: 20-80ms scaled by flam_amount, ±30% random variation
-      int base_gap = 625 + static_cast<int>(flam_amount * 1875.0f);
-      float variation = 1.0f + (x.variables.u[1] - 0.5f) * 0.6f;
-      flam_countdown_ = static_cast<int>(base_gap * variation);
+  // mirrors Process() logic for capped swing + microtiming
+  float swing_fraction = 0.0f;
+  if (grids_swing_ != 0.0f) {
+    float swing_amount = fabsf(grids_swing_);
+    bool step_is_swung;
+    if (grids_swing_ < 0.0f) {
+      step_is_swung = (drum_pattern_step_ & 2);  // pair swing
+    } else {
+      step_is_swung = ((drum_pattern_step_ % 3) == 2);  // triplet
     }
-  } else if (grids_flam_ > kFlamDead && snare_trig) {
-    // Right side: snare flams
-    float flam_amount = grids_flam_;  // 0 to 1
-    float flam_prob = flam_amount * (static_cast<float>(snare_lvl) / 255.0f);
-    if (snare_accent) flam_prob += 0.15f;  // accent bonus
-    if (x.variables.u[0] < flam_prob) {
-      flam_for_t1_ = false;
-      // Gap: 20-80ms scaled by flam_amount, ±30% random variation
-      int base_gap = 625 + static_cast<int>(flam_amount * 1875.0f);
-      float variation = 1.0f + (x.variables.u[1] - 0.5f) * 0.6f;
-      flam_countdown_ = static_cast<int>(base_gap * variation);
+    if (step_is_swung) {
+      swing_fraction = swing_amount * 0.5f;
     }
   }
 
+  // Cap micro-timing so swing + micro <= 75% of step period
+  const float kMaxCombined = 0.75f;
+  float micro_headroom = kMaxCombined - swing_fraction;
+  if (micro_headroom < 0.0f) micro_headroom = 0.0f;
+
+  // Micro-timing suppress: delay the trigger by a fraction of the period
+  bool kick_suppress = false, snare_suppress = false;
+  if (kick_micro > 0.0f && kick_trig && current_period_ > 0.0f) {
+    float capped = kick_micro < micro_headroom ? kick_micro : micro_headroom;
+    kick_suppress = true;
+    groove_delay_for_t1_ = true;
+    groove_delay_countdown_ = static_cast<int>(capped * current_period_);
+    if (groove_delay_countdown_ < 1) groove_delay_countdown_ = 1;
+  }
+  if (snare_micro > 0.0f && snare_trig && current_period_ > 0.0f) {
+    float capped = snare_micro < micro_headroom ? snare_micro : micro_headroom;
+    snare_suppress = true;
+    groove_delay_for_t1_ = false;
+    groove_delay_countdown_ = static_cast<int>(capped * current_period_);
+    if (groove_delay_countdown_ < 1) groove_delay_countdown_ = 1;
+  }
+
   int bitmask = 0;
-  if (kick_trig) bitmask |= 1;
-  if (snare_trig) bitmask |= 2;
+  if (kick_trig && !kick_suppress) bitmask |= 1;
+  if (snare_trig && !snare_suppress) bitmask |= 2;
 
   // Accent mode: 0=kick only, 1=hh only, 2=snare only, 3=all
   bool combined_accent;
@@ -661,21 +686,15 @@ void TGenerator::Process(bool use_external_clock, bool* reset, const GateFlags* 
       accent_slave_ramp_.Process(jittery_freq, &accent_ramp_value, &accent_gate);
       accent_gate_buffer_[sample_index_] = accent_gate;
 
-      // Flam countdown processing
-      // Duck period: 64 to 32 samples before flam (turn off main gate)
-      // Flam pulse: last 32 samples (fire the flam)
-      bool flam_gate = false;
-      bool flam_duck = false;
-      if (flam_countdown_ > 0) {
-        --flam_countdown_;
-        if (flam_countdown_ < 32) {
-          flam_gate = true;  // fire flam pulse
-        } else if (flam_countdown_ < 64) {
-          flam_duck = true;  // duck main gate before flam
+      // Groove delay: retrigger slave ramp after countdown expires
+      if (groove_delay_countdown_ > 0) {
+        --groove_delay_countdown_;
+        if (groove_delay_countdown_ == 0) {
+          float pw = 0.05f + 0.9f * pulse_width_mean_;
+          size_t idx = groove_delay_for_t1_ ? 0 : 1;
+          slave_ramp_[idx].Init(true, pw, 0.5f);
         }
       }
-      flam_gate_buffer_[sample_index_] = flam_gate;
-      flam_duck_buffer_[sample_index_] = flam_duck;
 
       if (!hh_gate) {
         *(ramps.master - 1) = 0.0f;

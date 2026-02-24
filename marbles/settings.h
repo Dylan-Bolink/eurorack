@@ -93,7 +93,7 @@ struct State {
   uint8_t grids_swing;
   uint8_t grids_accent_threshold;
   uint8_t grids_accent_variation;
-  uint8_t grids_flam;
+  uint8_t grids_groove_offset;
 
   uint8_t deja_vu_t_cv_swap;
   uint8_t deja_vu_x_cv_swap;
