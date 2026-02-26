@@ -198,15 +198,29 @@ class TGenerator {
     grids_groove_offset_ = offset;
   }
 
+  void set_grids_henri(bool henri) {
+    grids_.SetHenri(henri);
+  }
+
+  void set_grids_accent_hang(bool hang) {
+    grids_accent_hang_ = hang;
+  }
+
+  void set_grids_sync_playheads(bool sync) {
+    grids_sync_playheads_ = sync;
+  }
+
+  void set_grids_loop_start_at_one(bool at_one) {
+    grids_loop_start_at_one_ = at_one;
+  }
+
   void set_grids_deja_vu_active(bool active, bool reset_active = false) {
+    // On lock activation
     if (active && !prev_deja_vu_active_) {
       size_t len = static_cast<size_t>(grids_length_);
-      grids_loop_start_ = (drum_pattern_step_ + 33 - len) % 32;
-
-      // If explicit reset, start at beginning
-      if(reset_active) {
-        grids_loop_start_ = 0;
-      }
+      grids_loop_start_ = grids_loop_start_at_one_
+          ? 0
+          : (drum_pattern_step_ + 33 - len) % 32;
 
       // Clear step drifts on new lock
       for (size_t i = 0; i < 32; ++i) {
@@ -214,6 +228,21 @@ class TGenerator {
       }
       drift_order_head_ = 0;
       drift_order_count_ = 0;
+    }
+
+    // On unlock: sync playhead if enabled
+    if (!active && prev_deja_vu_active_ && grids_sync_playheads_) {
+      drum_pattern_step_ = grids_free_step_;
+    }
+
+    // Explicit reset: jump to loop start (or 0 if no loop)
+    if (reset_active) {
+      if (active) {
+        drum_pattern_step_ = grids_loop_start_;
+      } else {
+        drum_pattern_step_ = 0;
+        grids_free_step_ = 0;
+      }
     }
 
     prev_deja_vu_active_ = active;
@@ -302,6 +331,12 @@ class TGenerator {
 
   SlaveRamp hh_slave_ramp_;
   SlaveRamp accent_slave_ramp_;
+
+  bool grids_accent_hang_;
+  bool grids_sync_playheads_;
+  bool grids_loop_start_at_one_;
+  size_t grids_free_step_;  // shadow counter for sync playheads
+  uint8_t grids_part_perturbation_[3];  // per-instrument chaos, set at step 0
 
   size_t grids_loop_start_;
   bool prev_deja_vu_active_;

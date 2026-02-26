@@ -256,7 +256,18 @@ void Ui::UpdateLEDs() {
     case UI_MODE_NORMAL:
     case UI_MODE_RECORD_SCALE:
       {
-        if (settings_->state().t_model == T_GENERATOR_MODEL_GRIDS && 
+        // Grids advanced settings display: T_MODEL held
+        if (settings_->state().t_model == T_GENERATOR_MODEL_GRIDS &&
+            switches_.pressed(SWITCH_T_MODEL) && !switches_.pressed(SWITCH_X_MODE)) {
+          leds_.set(LED_T_RANGE, state.grids_henri ? LED_COLOR_GREEN : LED_COLOR_OFF);
+          leds_.set(LED_X_EXT, state.grids_accent_hang ? LED_COLOR_GREEN : LED_COLOR_OFF);
+          leds_.set(LED_T_DEJA_VU, state.grids_sync_playheads ? LED_COLOR_GREEN : LED_COLOR_OFF);
+          leds_.set(LED_X_DEJA_VU, state.grids_loop_start_at_one ? LED_COLOR_GREEN : LED_COLOR_OFF);
+
+          bool explicit_reset = state.explicit_reset ? LED_COLOR_YELLOW : LED_COLOR_OFF;
+          leds_.set(LED_X_CONTROL_MODE, explicit_reset);
+          leds_.set(LED_T_MODEL, explicit_reset);
+        } else if (settings_->state().t_model == T_GENERATOR_MODEL_GRIDS &&
             switches_.pressed(SWITCH_X_MODE)) {
 
           bool fast_blink = (system_clock.milliseconds() & 127) > 64;
@@ -478,7 +489,35 @@ void Ui::OnSwitchReleased(const Event& e) {
     mode_ = UI_MODE_DISPLAY_RESET_MODE;
     return;
   }
-  
+
+  // Grids advanced settings: T_MODEL held + button tap
+  if (state->t_model == T_GENERATOR_MODEL_GRIDS && switches_.pressed(SWITCH_T_MODEL)) {
+    if (e.control_id == SWITCH_T_RANGE) {
+      ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_T_RANGE] = true;
+      state->grids_henri = !state->grids_henri;
+      SaveState();
+      return;
+    }
+    if (e.control_id == SWITCH_X_EXT) {
+      ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_EXT] = true;
+      state->grids_accent_hang = !state->grids_accent_hang;
+      SaveState();
+      return;
+    }
+    if (e.control_id == SWITCH_T_DEJA_VU) {
+      ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_T_DEJA_VU] = true;
+      state->grids_sync_playheads = !state->grids_sync_playheads;
+      SaveState();
+      return;
+    }
+    if (e.control_id == SWITCH_X_DEJA_VU) {
+      ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_DEJA_VU] = true;
+      state->grids_loop_start_at_one = !state->grids_loop_start_at_one;
+      SaveState();
+      return;
+    }
+  }
+
   switch (e.control_id) {
     case SWITCH_T_DEJA_VU:
         if (state->t_deja_vu == DEJA_VU_OFF) {

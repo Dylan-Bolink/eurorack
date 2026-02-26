@@ -358,6 +358,10 @@ void Process(IOBuffer::Block* block, size_t size) {
     t_generator.set_grids_accent_threshold(accent_thresh);
     t_generator.set_grids_interpolation(state.grids_interpolation);
     t_generator.set_grids_bank(state.grids_bank);
+    t_generator.set_grids_henri(state.grids_henri);
+    t_generator.set_grids_accent_hang(state.grids_accent_hang);
+    t_generator.set_grids_sync_playheads(state.grids_sync_playheads);
+    t_generator.set_grids_loop_start_at_one(state.grids_loop_start_at_one);
 
     float groove_raw = static_cast<float>(state.grids_groove_offset) / 255.0f;
     float groove = (groove_raw - 0.5f) * 2.0f;
@@ -594,11 +598,10 @@ void Process(IOBuffer::Block* block, size_t size) {
         }
       }
 
-      // When pulse_width > 75% AND variation is not at noon, hold accent voltage
-      float pulse_width_mean = t_generator.get_pulse_width_mean();
+      // Accent voltage hold logic
       bool variation_active = (variation < 120 || variation > 136);
-      if (pulse_width_mean > 0.75f && variation_active) {
-        accent_voltage = held_accent_voltage;
+      if (state.grids_accent_hang && variation_active) {
+        accent_voltage = held_accent_voltage;  // always hold (S&H)
       } else if (current_accent) {
         accent_voltage = held_accent_voltage;
       }

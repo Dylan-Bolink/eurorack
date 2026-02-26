@@ -61,6 +61,7 @@ const uint8_t* drum_map[3][5][5] = {
 
 void PatternGenerator::Init() {
   bank_ = 0;
+  henri_ = false;
 }
 
 uint8_t PatternGenerator::ReadDrumMap(
@@ -68,21 +69,40 @@ uint8_t PatternGenerator::ReadDrumMap(
     uint8_t instrument,
     uint8_t x,
     uint8_t y) {
-  uint8_t i = x >> 6;
-  uint8_t j = y >> 6;
+  uint8_t i, j;
+
+  if (henri_) {
+    i = static_cast<uint8_t>(static_cast<uint16_t>(x) * 3 / 255);
+    j = static_cast<uint8_t>(static_cast<uint16_t>(y) * 3 / 255);
+    if (i > 3) i = 3;
+    if (j > 3) j = 3;
+  } else {
+    i = x >> 6;
+    j = y >> 6;
+  }
 
   const uint8_t* a_map = drum_map[bank_][i][j];
   const uint8_t* b_map = drum_map[bank_][i + 1][j];
   const uint8_t* c_map = drum_map[bank_][i][j + 1];
   const uint8_t* d_map = drum_map[bank_][i + 1][j + 1];
-  
+
   uint8_t offset = (instrument * kStepsPerPattern) + step;
-  
+
   uint8_t a = pgm_read_byte(a_map + offset);
   uint8_t b = pgm_read_byte(b_map + offset);
   uint8_t c = pgm_read_byte(c_map + offset);
   uint8_t d = pgm_read_byte(d_map + offset);
-  
+
+  if (henri_) {
+    uint8_t hx = x >> 1;  // 0-127
+    uint8_t hy = y >> 1;
+    const uint16_t maxVal = 127;
+    uint16_t r = ((uint16_t)(a * hx + b * (maxVal - hx)) * hy
+                + (uint16_t)(c * hx + d * (maxVal - hx)) * (maxVal - hy))
+                / maxVal / maxVal;
+    return static_cast<uint8_t>(r > 255 ? 255 : r);
+  }
+
   return U8Mix(U8Mix(a, b, x << 2), U8Mix(c, d, x << 2), y << 2);
 }
 

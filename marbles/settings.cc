@@ -201,6 +201,10 @@ void Settings::Init() {
   state_.explicit_reset = 0;
   state_.grids_interpolation = 1;  // Default ON
   state_.grids_bank = 0;
+  state_.grids_henri = 0;
+  state_.grids_accent_hang = 0;
+  state_.grids_sync_playheads = 0;
+  state_.grids_loop_start_at_one = 0;
 
   state_.grids_x = 0;
   state_.grids_y = 0;

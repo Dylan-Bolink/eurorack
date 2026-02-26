@@ -102,8 +102,12 @@ struct State {
   uint8_t explicit_reset;
   uint8_t grids_interpolation;
   uint8_t grids_bank;
+  uint8_t grids_henri;
+  uint8_t grids_accent_hang;
+  uint8_t grids_sync_playheads;
+  uint8_t grids_loop_start_at_one;
 
-  uint8_t padding[14];  // Reserve space for future fields (48 bytes total)
+  uint8_t padding[10];  // Reserve space for future fields (48 bytes total)
 
   enum { tag = 0x54415453 };
 };

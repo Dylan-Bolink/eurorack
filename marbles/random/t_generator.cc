@@ -169,6 +169,12 @@ void TGenerator::Init(RandomStream* random_stream, float sr) {
   groove_delay_countdown_ = 0;
   groove_delay_for_t1_ = true;
 
+  grids_accent_hang_ = false;
+  grids_sync_playheads_ = false;
+  grids_loop_start_at_one_ = false;
+  grids_free_step_ = 0;
+  fill(grids_part_perturbation_, grids_part_perturbation_ + 3, 0);
+
   grids_loop_start_ = 0;
   prev_deja_vu_active_ = false;
   fill(&grids_step_replacement_[0], &grids_step_replacement_[32], 0xFF);
@@ -280,6 +286,8 @@ void TGenerator::ScheduleOutputPulses(const RandomVector& x, int bitmask) {
 
 int TGenerator::GenerateGrids(const RandomVector& x) {
   ++drum_pattern_step_;
+  ++grids_free_step_;
+  if (grids_free_step_ >= 32) grids_free_step_ = 0;
   size_t len = static_cast<size_t>(grids_length_);
   if (len < 1) len = 32;
 
@@ -365,11 +373,17 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
   uint8_t chaos_amt = (grids_chaos_ > 0.0f)
       ? static_cast<uint8_t>(grids_chaos_ * 64.0f)
       : 0;
-  
-  uint8_t p[3];
-  p[0] = static_cast<uint8_t>(x.variables.u[0] * chaos_amt);
-  p[1] = static_cast<uint8_t>(x.variables.u[1] * chaos_amt);
-  p[2] = static_cast<uint8_t>((x.variables.u[0] + x.variables.u[1]) * 0.5f * chaos_amt);
+
+  //read_step normal 32-step cycle wrap
+  //loop_wrapped loop boundary when locked loop
+  // chaos_amt == 0 immediate reset when chaos is turned off
+  if (read_step == 0 || loop_wrapped || chaos_amt == 0) {
+    grids_part_perturbation_[0] = static_cast<uint8_t>(x.variables.u[0] * chaos_amt);
+    grids_part_perturbation_[1] = static_cast<uint8_t>(x.variables.u[1] * chaos_amt);
+    grids_part_perturbation_[2] = static_cast<uint8_t>(
+        (x.variables.u[0] + x.variables.u[1]) * 0.5f * chaos_amt);
+  }
+  uint8_t* p = grids_part_perturbation_;
 
   // Right density drifting
   int8_t density_drift = 0;
