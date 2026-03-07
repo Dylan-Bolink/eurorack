@@ -56,6 +56,7 @@ const LedColor Ui::palette_[4] = {
 /* static */
 AlternateKnobMapping Ui::alternate_knob_mappings_[ADC_CHANNEL_LAST];
 static uint8_t prev_t_model = 255;
+static int8_t grids_held_first = -1;
 
 void Ui::Init(
     Settings* settings,
@@ -134,9 +135,13 @@ void Ui::Poll() {
     uint8_t rate_knob = static_cast<uint8_t>(cv_reader_->channel(ADC_CHANNEL_T_RATE).unscaled_pot() * 255.0f);
     s->t_rate_stored = rate_knob;
     s->grids_hh_density = rate_knob;
+    grids_held_first = -1;
   }
   prev_t_model = s->t_model;
-  
+  if (s->t_model < marbles::T_GENERATOR_MODEL_GRIDS) {
+    grids_held_first = -1;
+  }
+
   if (s->t_model == marbles::T_GENERATOR_MODEL_GRIDS) {
     // GRIDS MODE: Remap Shift-Knobs to Grids Variables
     alternate_knob_mappings_[ADC_CHANNEL_X_STEPS].destination = &s->grids_x;
@@ -161,12 +166,21 @@ void Ui::Poll() {
       queue_.AddEvent(CONTROL_SWITCH, i, 0);
       press_time_[i] = system_clock.milliseconds();
       ignore_release_[i] = false;
+      if (settings_->state().t_model >= T_GENERATOR_MODEL_GRIDS && grids_held_first == -1) {
+        if (i == SWITCH_T_MODEL || i == SWITCH_X_MODE) {
+          grids_held_first = i;
+        }
+      }
     }
     if (switches_.pressed(Switch(i)) && !ignore_release_[i]) {
       int32_t pressed_time = system_clock.milliseconds() - press_time_[i];
       if (pressed_time > kLongPressDuration && !setting_modification_flag_) {
-        queue_.AddEvent(CONTROL_SWITCH, i, pressed_time);
-        ignore_release_[i] = true;
+        bool suppress = (i == SWITCH_T_MODEL &&
+            settings_->state().t_model >= T_GENERATOR_MODEL_GRIDS);
+        if (!suppress) {
+          queue_.AddEvent(CONTROL_SWITCH, i, pressed_time);
+          ignore_release_[i] = true;
+        }
       }
     }
     if (switches_.released(Switch(i)) && !ignore_release_[i]) {
@@ -177,7 +191,18 @@ void Ui::Poll() {
       ignore_release_[i] = true;
     }
   }
-  
+
+  if (switches_.released(SWITCH_T_MODEL)) {
+    if (grids_held_first == SWITCH_T_MODEL) {
+      grids_held_first = switches_.pressed(SWITCH_X_MODE) ? SWITCH_X_MODE : -1;
+    }
+  }
+  if (switches_.released(SWITCH_X_MODE)) {
+    if (grids_held_first == SWITCH_X_MODE) {
+      grids_held_first = switches_.pressed(SWITCH_T_MODEL) ? SWITCH_T_MODEL : -1;
+    }
+  }
+
   UpdateLEDs();
 }
 
@@ -257,18 +282,20 @@ void Ui::UpdateLEDs() {
     case UI_MODE_RECORD_SCALE:
       {
         // Grids advanced settings display: T_MODEL held
+        int32_t t_model_held = system_clock.milliseconds() - press_time_[SWITCH_T_MODEL];
+        bool t_model_exiting = t_model_held >= kLongPressDuration && !ignore_release_[SWITCH_T_MODEL];
         if (settings_->state().t_model == T_GENERATOR_MODEL_GRIDS &&
-            switches_.pressed(SWITCH_T_MODEL) && !switches_.pressed(SWITCH_X_MODE)) {
+            switches_.pressed(SWITCH_T_MODEL) && grids_held_first == SWITCH_T_MODEL &&
+            !t_model_exiting) {
           leds_.set(LED_T_RANGE, state.grids_henri ? LED_COLOR_GREEN : LED_COLOR_OFF);
           leds_.set(LED_X_EXT, state.grids_accent_hang ? LED_COLOR_GREEN : LED_COLOR_OFF);
+
           leds_.set(LED_T_DEJA_VU, state.grids_sync_playheads ? LED_COLOR_GREEN : LED_COLOR_OFF);
           leds_.set(LED_X_DEJA_VU, state.grids_loop_start_at_one ? LED_COLOR_GREEN : LED_COLOR_OFF);
 
-          bool explicit_reset = state.explicit_reset ? LED_COLOR_YELLOW : LED_COLOR_OFF;
-          leds_.set(LED_X_CONTROL_MODE, explicit_reset);
-          leds_.set(LED_T_MODEL, explicit_reset);
+          leds_.set(LED_X_CONTROL_MODE, state.explicit_reset ? LED_COLOR_YELLOW : LED_COLOR_OFF);
         } else if (settings_->state().t_model == T_GENERATOR_MODEL_GRIDS &&
-            switches_.pressed(SWITCH_X_MODE)) {
+            switches_.pressed(SWITCH_X_MODE) && grids_held_first == SWITCH_X_MODE) {
 
           bool fast_blink = (system_clock.milliseconds() & 127) > 64;
 
@@ -473,21 +500,30 @@ void Ui::OnSwitchReleased(const Event& e) {
 
   // T pressed while X held > Cycle bank
   if (e.control_id == SWITCH_T_MODEL && switches_.pressed(SWITCH_X_MODE)) {
-    ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_MODE] = true;
-    uint8_t combined = state->grids_bank + (state->grids_interpolation ? 0 : 3);
-    combined = (combined + 1) % 6;
-    state->grids_bank = combined % 3;
-    state->grids_interpolation = (combined < 3) ? 1 : 0;
-    SaveState();
-    return;
+    bool is_grids = state->t_model >= T_GENERATOR_MODEL_GRIDS;
+    if (!is_grids || grids_held_first == SWITCH_X_MODE) {
+      ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_MODE] = true;
+      uint8_t combined = state->grids_bank + (state->grids_interpolation ? 0 : 3);
+      combined = (combined + 1) % 6;
+      state->grids_bank = combined % 3;
+      state->grids_interpolation = (combined < 3) ? 1 : 0;
+      SaveState();
+      return;
+    }
   }
 
   // X pressed while T held > Toggle explicit reset
   if (e.control_id == SWITCH_X_MODE && switches_.pressed(SWITCH_T_MODEL)) {
-    ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_MODE] = true;
-    state->explicit_reset = !state->explicit_reset;
-    mode_ = UI_MODE_DISPLAY_RESET_MODE;
-    return;
+    bool is_grids = state->t_model >= T_GENERATOR_MODEL_GRIDS;
+    if (!is_grids || grids_held_first == SWITCH_T_MODEL) {
+      ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_MODE] = true;
+      state->explicit_reset = !state->explicit_reset;
+      if (!is_grids) {
+        mode_ = UI_MODE_DISPLAY_RESET_MODE;
+      }
+      SaveState();
+      return;
+    }
   }
 
   // Grids advanced settings: T_MODEL held + button tap
@@ -513,6 +549,12 @@ void Ui::OnSwitchReleased(const Event& e) {
     if (e.control_id == SWITCH_X_DEJA_VU) {
       ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_DEJA_VU] = true;
       state->grids_loop_start_at_one = !state->grids_loop_start_at_one;
+      SaveState();
+      return;
+    }
+    if (e.control_id == SWITCH_X_MODE) {
+      ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_MODE] = true;
+      state->explicit_reset = !state->explicit_reset;
       SaveState();
       return;
     }
@@ -550,13 +592,14 @@ void Ui::OnSwitchReleased(const Event& e) {
     case SWITCH_T_MODEL:
       {
         uint8_t bank = state->t_model / 3;
-        if (e.data >= kMediumPressDuration) {
-          if (!bank) {
-            state->t_model += 3;
+        if (bank) {
+          // In Grids mode: only long press (>=2s) exits
+          if (e.data >= kLongPressDuration) {
+            state->t_model -= 3;
           }
         } else {
-          if (bank) {
-            state->t_model -= 3;
+          if (e.data >= kMediumPressDuration) {
+            state->t_model += 3;
           } else {
             state->t_model = (state->t_model + 1) % 3;
           }
@@ -711,8 +754,6 @@ void Ui::UpdateHiddenParameters() {
         if (!switches_.pressed(SWITCH_X_MODE)) {
           // Normal mode: update HH density
           state->grids_hh_density = static_cast<uint8_t>(new_value * 255.0f);
-          cv_reader_->mutable_channel(i)->LockPot();
-          setting_modification_flag_ = true;
           continue;
         }
       }

@@ -377,28 +377,28 @@ void Process(IOBuffer::Block* block, size_t size) {
 
     // Map X CV: 0=off, 1=steps, 2=t_bias
     if (settings.grids_x_cv_swap() == 1) {
-        final_x += cv_reader.channel(ADC_CHANNEL_X_STEPS).scaled_raw_cv();
+        final_x += cv_reader.channel(ADC_CHANNEL_X_STEPS).cv();
         CONSTRAIN(final_x, 0.0f, 1.0f);
     } else if (settings.grids_x_cv_swap() == 2) {
-        final_x += cv_reader.channel(ADC_CHANNEL_T_BIAS).scaled_raw_cv();
+        final_x += cv_reader.channel(ADC_CHANNEL_T_BIAS).cv();
         CONSTRAIN(final_x, 0.0f, 1.0f);
     }
 
     // Map Y CV: 0=off, 1=x_bias, 2=jitter
     if (settings.grids_y_cv_swap() == 1) {
-        final_y += cv_reader.channel(ADC_CHANNEL_X_BIAS).scaled_raw_cv();
+        final_y += cv_reader.channel(ADC_CHANNEL_X_BIAS).cv();
         CONSTRAIN(final_y, 0.0f, 1.0f);
     } else if (settings.grids_y_cv_swap() == 2) {
-        final_y += cv_reader.channel(ADC_CHANNEL_T_JITTER).scaled_raw_cv();
+        final_y += cv_reader.channel(ADC_CHANNEL_T_JITTER).cv();
         CONSTRAIN(final_y, 0.0f, 1.0f);
     }
 
     // Chaos CV: 0=off, 1=spread, 2=rate
     if (settings.grids_chaos_cv_swap() == 1 && !state.x_register_mode) {
-        final_chaos += cv_reader.channel(ADC_CHANNEL_X_SPREAD).scaled_raw_cv();
+        final_chaos += cv_reader.channel(ADC_CHANNEL_X_SPREAD).cv();
         CONSTRAIN(final_chaos, -1.0f, 1.0f);
     } else if (settings.grids_chaos_cv_swap() == 2) {
-        final_chaos += cv_reader.channel(ADC_CHANNEL_T_RATE).scaled_raw_cv();
+        final_chaos += cv_reader.channel(ADC_CHANNEL_T_RATE).cv() / 60.0f;
         CONSTRAIN(final_chaos, -1.0f, 1.0f);
     }
     if (fabsf(final_chaos) < 0.06f) final_chaos = 0.0f;
@@ -407,9 +407,7 @@ void Process(IOBuffer::Block* block, size_t size) {
 
     float hh_density = static_cast<float>(state.grids_hh_density) / 255.0f;
     if (settings.grids_chaos_cv_swap() != 2) {
-        float cv = cv_reader.channel(ADC_CHANNEL_T_RATE).scaled_raw_cv();
-        // a extra check for small CV noise
-        if (cv > 0.02f || cv < -0.02f) hh_density += cv;
+        hh_density += cv_reader.channel(ADC_CHANNEL_T_RATE).cv() / 60.0f;
     }
     CONSTRAIN(hh_density, 0.0f, 1.0f);
 

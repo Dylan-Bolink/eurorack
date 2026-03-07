@@ -1,33 +1,31 @@
 # Mutable Instruments - Marbles: Truchets
 
-A reimagining of Mutable Instruments [**_Grids_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/grids/) drum pattern generator, now living inside Marbles. Truchets is build up on  [**_Marbles 1.3_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/marbles/firmware/). All other modes still function the same as in the original firmware.
+A reimagining of Mutable Instruments [**_Grids_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/grids/) drum pattern generator, now living inside Marbles. Truchets is built on [**_Marbles 1.3_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/marbles/firmware/). All other modes still function the same as in the original firmware.
+
+---
 
 ## Activating Grids Mode
 
-Long press T mode while on drum mode (Solid red) to enter Grids mode (Blinking red)
-
----
-
-### Grids Mode
-
-When Grids mode is active, the T-section transforms into a three-voice drum trigger generator based on the classic Grids topology.
-
----
+Long press **T Mode** while on drum mode (solid red) to enter Grids mode (blinking red).
 
 ## Outputs
+
 | Output | Function |
-|------|----------|
+|--------|----------|
 | **T1** | Kick trigger |
 | **T2** | Hi-hat trigger |
 | **T3** | Snare trigger |
-| **Y** | Accent gate (active when pattern accent is high) |
+| **Y** | Accent output |
 | **X1/X2/X3** | Random voltages |
 
 ---
+<br><br>
 
-## Density Controls
+## Standard Controls
 
-The T-section knobs control trigger density for each voice:
+<img src="images/truchets_cheatsheet_1.png" style="width:500px;">
+
+### Density Knobs
 
 | Knob | Controls |
 |------|----------|
@@ -37,60 +35,127 @@ The T-section knobs control trigger density for each voice:
 
 All three respond to CV input.
 
+### Deja Vu (T Side)
+
+The Deja Vu section controls pattern looping:
+
+- **T Deja Vu Button**: Tap to toggle loop lock on/off
+- **Deja Vu Length**: Sets loop length (when locked)
+- **Deja Vu Amount**: Controls loop behavior (see below)
+
+#### Deja Vu Amount Behavior
+
+| Direction | Effect |
+|-----------|--------|
+| **Left of noon** | Chance to shift loop start point +1 step each cycle |
+| **Noon** | Neutral - no variation |
+| **Right of noon** | Chance for density drift on steps (clears when unlocked) |
+
 ---
+<br><br>
 
-## Map & Tempo Controls
+## Y Shift Layer - Knobs
 
-Hold **X Mode** (N in the manual) and turn knobs to access hidden parameters:
+**Hold X Mode** and turn knobs to access hidden parameters.
 
-| Hold X Mode + | Controls |
-|---------------|----------|
+<img src="images/truchets_cheatsheet_2.png" style="width:500px;">
+
+| Hold X Mode + Turn | Controls |
+|--------------------|----------|
+| **Bias (T)** | Groove offset (kick/snare timing) |
+| **Rate** | Rate |
+| **Jitter** | Swing |
 | **Steps** | Map X |
 | **Bias (X)** | Map Y |
 | **Spread** | Chaos |
-| **Rate** | Tempo (stored on mode entry) |
-| **Jitter** | Swing |
+| **Deja Vu Amount** | Accent control |
+| **Deja Vu Length** | Accent variation |
 
-These where the old Y parameters but Y is now used as a accent output
+### Groove Offset
+
+| Position | Effect |
+|----------|--------|
+| **Far left** | Kick +3 steps late |
+| **Inbetween** | Kick +1 and +2 steps late |
+| **Left** | Kick micro-timing late (up to 50%) |
+| **Noon** | Neutral (on beat) |
+| **Right** | Snare micro-timing late (up to 50%) |
+| **Inbetween** | Snare +1 and +2 steps late |
+| **Far right** | Snare +3 steps late |
+
+### Swing
+
+| Position | Effect |
+|----------|--------|
+| **Left** | Paired swing - classic shuffle |
+| **Noon** | No swing |
+| **Right** | Triplet swing |
+
+### Chaos
+
+| Position | Effect |
+|----------|--------|
+| **Left** | Random tempo jitter (humanize) |
+| **Noon** | No chaos |
+| **Right** | Density chaos (ghost notes / fills) |
+
+### Accent Control
+
+| Position | Effect |
+|----------|--------|
+| **Far left** | Kick accent only (threshold 192) |
+| **Left** | Hi-hat accent only (threshold 192) |
+| **Center-left** | Snare accent only (threshold 192) |
+| **Noon** | All accents combined (threshold 192) |
+| **Right to far right** | All accents combined, lowering threshold (more accents) |
+
+### Accent Variation
+
+| Position | Effect |
+|----------|--------|
+| **Left** | Random voltage window (1V-5V at far left, 4.9V-5V near noon) |
+| **Noon** | Standard 5V gates |
+| **Right** | Velocity-sensitive gates (voltage follows accent level) |
 
 ---
+<br><br>
 
-## CV swap System
+## Y Shift Layer - Buttons
 
-Truchets features a flexible CV routing system. These CV routings only apply while you are in the Grids T model (Blinking red) While holding **X Mode** (N in the manual), press buttons to cycle through CV swap states:
+**Hold X Mode** and press buttons to access CV routing and settings.
 
-### Map CV Routing
+<img src="images/truchets_cheatsheet_3.png" style="width:500px;">
+
+### Pattern Banks
+
+Hold **X Mode** + tap **T Model** to cycle through pattern banks:
+
+| LED State | Bank |
+|-----------|------|
+| Solid Green | OG Grids |
+| Solid Orange | Electronic |
+| Solid Red | Breakbeat |
+| Blinking Green | OG Grids (no interpolation) |
+| Blinking Orange | Electronic (no interpolation) |
+| Blinking Red | Breakbeat (no interpolation) |
+
+> **Interpolation vs No Interpolation:** With interpolation (solid LED), patterns morph smoothly between the 25 positions in the 5x5 grid as you adjust Map X/Y. Without interpolation (blinking LED), Map X/Y snap to the nearest of the 25 grid positions — no morphing, just the raw patterns.
+
+### CV Swap Routing
 
 | Hold X Mode + Press | LED State | CV Source |
 |---------------------|-----------|-----------|
-| **T Range** (Map X) | Off | No CV |
+| **T Range** | Off | No CV |
 | | Green | Steps CV → Map X |
 | | Blinking | Bias (T) CV → Map X |
-| **X Ext** (Chaos) | Off | No CV |
+| **X Ext** | Off | No CV |
 | | Green | Spread CV → Chaos |
 | | Blinking | Rate CV → Chaos |
-| **X Range** (Map Y) | Off | No CV |
+| **X Range** | Off | No CV |
 | | Green | Bias (X) CV → Map Y |
 | | Blinking | Jitter CV → Map Y |
 
-The button location makes the most sense with the original marbles module where the buttons and corresponding knobs are aligned from left to right.
-
----
-
-### Deja vu and Deja vu Lock CV Swap
-
-Locking the T side works with the grids mode. Unlocked it will play a 32 step pattern. In a locked state it will follow the deja vu length setting. The start of the loop can be set to the first beat by sending a [explicit reset](https://arc.net/l/quote/tvtbrctw).<br /><br />
-
-#### Deja vu amount
-
-##### **Left side** Increase start point: 
-Creates a chance to increase the loop start step by +1 each time you pass the loop time step.
-
-##### **Right side** Density drifting: 
-Increases the chance a step gets a density knob drift. Once the Deja vu lock is turned of the density drifts will be cleared.<br /><br />
-
-While holding **X Mode** (N in the manual) and pressing the lock buttons the deja vu cv input can be repurposed:
-
+### Deja Vu CV Swap
 
 | Hold X Mode + Press | LED State | Function |
 |---------------------|-----------|----------|
@@ -99,27 +164,48 @@ While holding **X Mode** (N in the manual) and pressing the lock buttons the dej
 | **X Déjà Vu** | Off | Normal behavior |
 | | Green | Déjà Vu CV gates X-side lock |
 
-When enabled, a **gate signal (+2.5V)** on the Déjà Vu CV input flips the lock state:
-- If unlocked → locks the pattern
-- If locked → unlocks the pattern
-
-Both T and X can be enabled simultaneously for synchronized lock control. If non are active the Deja vu cv input will work as before.
+When enabled, a **gate signal (+2.5V)** on the Déjà Vu CV input flips the lock state.
 
 ---
+<br><br>
 
-## LED Reference (while holding X Mode)
+## Advanced Settings Layer
 
-| LED | Shows |
-|-----|-------|
-| T Range | Map X CV swap state |
-| X Ext | Chaos CV swap state |
-| X Range | Map Y CV swap state |
-| T Model | Explicit reset enabled |
-| T Déjà Vu | T lock CV swap enabled |
-| X Déjà Vu | X lock CV swap enabled |
+**Hold T Model** and press buttons to toggle advanced settings.
+
+<img src="images/truchets_cheatsheet_4.png" style="width:500px;">
+
+| Hold T Model + Press | Setting | Off (default) | On (LED lit) |
+|----------------------|---------|---------------|--------------|
+| **T Range** | Read mode | Normal | Henri |
+| **X Ext** | Accent hang | Normal gates | Hanging accents |
+| **T Déjà Vu** | Loop playhead | Shared playhead | Independent playhead |
+| **X Déjà Vu** | Loop start | Dynamic (from current step) | Always from beat 1 |
+| **X Mode** | Explicit reset | Off | On |
+
+### Setting Descriptions
+
+#### Henri Mode (T Range)
+Switches pattern reading between Normal (original Grids algorithm) and Henri (alternate reading from Grids4Live Max plugin). Henri mode produces different rhythmic relationships between kick, snare, and hi-hat.
+
+#### Accent Hang (X Ext)
+When **on** AND a accent variation is active, accents will sustain until the next accent fires (no voltage dips between accents / no gates).
+
+#### Independent Loop Playhead (T Déjà Vu)
+When **on**, the loop has its own playhead separate from the main pattern. When you unlock, playback stays in sync with where the pattern would have been.
+
+#### Loop from Beat 1 (X Déjà Vu)
+When **on**, loops always start from step 1 of the pattern instead of the step where you activated the loop.
+
+#### Explicit Reset (X Mode)
+Original Marbles 1.3 setting. When enabled, reset input resets the pattern to step 1 or to the first step of the loop window when looped.
 
 ---
+<br><br>
 
 ## Credits
 
 - Original Marbles & Grids firmware by **Émilie Gillet** (Mutable Instruments)
+- This very handy grids [pattern website](https://goodtohear.co.uk/tools/grids-sequencer) by **Michael Forrest**
+- VCV Rack Topograph for all the A/B Testing by **Dale Johnson**
+- Henri mode based on Grids4Live by **Henri David**
