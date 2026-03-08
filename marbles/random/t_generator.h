@@ -335,7 +335,7 @@ class TGenerator {
   bool grids_accent_hang_;
   bool grids_sync_playheads_;
   bool grids_loop_start_at_one_;
-  size_t grids_free_step_;  // shadow counter for sync playheads
+  uint8_t grids_free_step_;  // shadow counter for sync playheads
   uint8_t grids_part_perturbation_[3];  // per-instrument chaos, set at step 0
 
   size_t grids_loop_start_;
