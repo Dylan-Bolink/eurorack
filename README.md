@@ -2,11 +2,13 @@
 
 A reimagining of Mutable Instruments [**_Grids_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/grids/) drum pattern generator, now living inside Marbles. Truchets is built on [**_Marbles 1.3_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/marbles/firmware/). All other modes still function the same as in the original firmware.
 
----
+<br><br>
 
 ## Activating Grids Mode
 
 Long press **T Mode** while on drum mode (solid red) to enter Grids mode (blinking red).
+
+> To exit long press **T Mode** without changing anything in the advanced layer.
 
 ## Outputs
 
@@ -18,7 +20,6 @@ Long press **T Mode** while on drum mode (solid red) to enter Grids mode (blinki
 | **Y** | Accent output |
 | **X1/X2/X3** | Random voltages |
 
----
 <br><br>
 
 ## Standard Controls
@@ -33,7 +34,7 @@ Long press **T Mode** while on drum mode (solid red) to enter Grids mode (blinki
 | **Rate** | Hi-hat density |
 | **Jitter** | Snare density |
 
-All three respond to CV input.
+> All three respond to CV input.
 
 ### Deja Vu (T Side)
 
@@ -51,7 +52,8 @@ The Deja Vu section controls pattern looping:
 | **Noon** | Neutral - no variation |
 | **Right of noon** | Chance for density drift on steps (clears when unlocked) |
 
----
+> When the knob is fully left or right the chance is 100%.
+
 <br><br>
 
 ## Y Shift Layer - Knobs
@@ -62,7 +64,7 @@ The Deja Vu section controls pattern looping:
 
 | Hold X Mode + Turn | Controls |
 |--------------------|----------|
-| **Bias (T)** | Groove offset (kick/snare timing) |
+| **Bias (T)** | Groove offset |
 | **Rate** | Rate |
 | **Jitter** | Swing |
 | **Steps** | Map X |
@@ -76,12 +78,16 @@ The Deja Vu section controls pattern looping:
 | Position | Effect |
 |----------|--------|
 | **Far left** | Kick +3 steps late |
-| **Inbetween** | Kick +1 and +2 steps late |
+| **Center left** | Kick +1 and +2 steps late |
 | **Left** | Kick micro-timing late (up to 50%) |
 | **Noon** | Neutral (on beat) |
 | **Right** | Snare micro-timing late (up to 50%) |
-| **Inbetween** | Snare +1 and +2 steps late |
+| **Center right** | Snare +1 and +2 steps late |
 | **Far right** | Snare +3 steps late |
+
+### Rate
+
+The same Rate/tempo control from the standard Marbles interface, moved here to free up the knob for hi-hat density.
 
 ### Swing
 
@@ -91,6 +97,14 @@ The Deja Vu section controls pattern looping:
 | **Noon** | No swing |
 | **Right** | Triplet swing |
 
+> Both swings go to 50% max
+
+### Map X & Map Y
+
+Change the pattern coordinates on the current bank. 
+
+> [Original Grids manual](https://pichenettes.github.io/mutable-instruments-documentation/modules/grids/manual/)
+
 ### Chaos
 
 | Position | Effect |
@@ -99,15 +113,21 @@ The Deja Vu section controls pattern looping:
 | **Noon** | No chaos |
 | **Right** | Density chaos (ghost notes / fills) |
 
+> The left side of the chaos knob uses the normal Jitter logic from the other modes.
+
 ### Accent Control
 
 | Position | Effect |
 |----------|--------|
-| **Far left** | Kick accent only (threshold 192) |
-| **Left** | Hi-hat accent only (threshold 192) |
-| **Center-left** | Snare accent only (threshold 192) |
-| **Noon** | All accents combined (threshold 192) |
-| **Right to far right** | All accents combined, lowering threshold (more accents) |
+| **Far left** | Kick accent only |
+| **Left** | Hi-hat accent only |
+| **Center-left** | Snare accent only |
+| **Noon** | All accents combined |
+| **Right to far right** | All accents combined, lowering threshold |
+
+> 192 is the original grids threshold for an accent and is used on the left to noon side of the knob.
+
+> Lowering threshold creates more gates. If accent control is fully to the right an accent will always be fired when any of the outputs are firing.
 
 ### Accent Variation
 
@@ -117,7 +137,6 @@ The Deja Vu section controls pattern looping:
 | **Noon** | Standard 5V gates |
 | **Right** | Velocity-sensitive gates (voltage follows accent level) |
 
----
 <br><br>
 
 ## Y Shift Layer - Buttons
@@ -155,6 +174,8 @@ Hold **X Mode** + tap **T Model** to cycle through pattern banks:
 | | Green | Bias (X) CV → Map Y |
 | | Blinking | Jitter CV → Map Y |
 
+> The routing follows a left-to-right logic across the panel. The buttons (center) map to the shift layer knobs (right side): one press assigns the CV input next to that knob (green), a second press mirrors it to the corresponding CV input on the left side of the module (blinking).
+
 ### Deja Vu CV Swap
 
 | Hold X Mode + Press | LED State | Function |
@@ -164,9 +185,8 @@ Hold **X Mode** + tap **T Model** to cycle through pattern banks:
 | **X Déjà Vu** | Off | Normal behavior |
 | | Green | Déjà Vu CV gates X-side lock |
 
-When enabled, a **gate signal (+2.5V)** on the Déjà Vu CV input flips the lock state.
+> When enabled, a **gate signal (+2.5V)** on the Déjà Vu CV input flips the lock state.
 
----
 <br><br>
 
 ## Advanced Settings Layer
@@ -189,7 +209,9 @@ When enabled, a **gate signal (+2.5V)** on the Déjà Vu CV input flips the lock
 Switches pattern reading between Normal (original Grids algorithm) and Henri (alternate reading from Grids4Live Max plugin). Henri mode produces different rhythmic relationships between kick, snare, and hi-hat.
 
 #### Accent Hang (X Ext)
-When **on** AND a accent variation is active, accents will sustain until the next accent fires (no voltage dips between accents / no gates).
+When **on** AND an accent variation is active, accents will sustain until the next accent fires.
+
+> This turns accent into a sample and hold output driven by accent and the current accent variation.
 
 #### Independent Loop Playhead (T Déjà Vu)
 When **on**, the loop has its own playhead separate from the main pattern. When you unlock, playback stays in sync with where the pattern would have been.
@@ -200,7 +222,8 @@ When **on**, loops always start from step 1 of the pattern instead of the step w
 #### Explicit Reset (X Mode)
 Original Marbles 1.3 setting. When enabled, reset input resets the pattern to step 1 or to the first step of the loop window when looped.
 
----
+> [1.3 manual](https://pichenettes.github.io/mutable-instruments-documentation/modules/marbles/firmware/#:~:text=Implicit%20and%20explicit,experience%20odd%20timing.)
+
 <br><br>
 
 ## Credits
