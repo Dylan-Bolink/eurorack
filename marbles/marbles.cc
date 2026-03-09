@@ -219,7 +219,6 @@ Ramps ramps;
 GroupSettings x, y;
 bool gate_delay_tail[kNumGateOutputs][kGateDelay];
 bool accent_cv_delay_tail[kGateDelay] = {false, false};
-bool prev_accent_gate = false;
 float held_accent_voltage = 5.0f;
 
 float SineOscillator(float voltage) {
@@ -604,7 +603,6 @@ void Process(IOBuffer::Block* block, size_t size) {
         accent_voltage = held_accent_voltage;
       }
 
-      prev_accent_gate = current_accent;
       block->cv_output[0][i] = DacCode(0, accent_voltage);
 
       accent_cv_delay_tail[0] = accent_cv_delay_tail[1];

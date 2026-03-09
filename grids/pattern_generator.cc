@@ -97,8 +97,8 @@ uint8_t PatternGenerator::ReadDrumMap(
     uint8_t hx = x >> 1;  // 0-127
     uint8_t hy = y >> 1;
     const uint16_t maxVal = 127;
-    uint16_t r = ((uint16_t)(a * hx + b * (maxVal - hx)) * hy
-                + (uint16_t)(c * hx + d * (maxVal - hx)) * (maxVal - hy))
+    uint32_t r = ((uint32_t)(a * hx + b * (maxVal - hx)) * hy
+                + (uint32_t)(c * hx + d * (maxVal - hx)) * (maxVal - hy))
                 / maxVal / maxVal;
     return static_cast<uint8_t>(r > 255 ? 255 : r);
   }

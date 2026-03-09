@@ -776,7 +776,7 @@ void Ui::UpdateHiddenParameters() {
       }
       
       AlternateKnobMapping mapping = alternate_knob_mappings_[i];
-      if (switches_.pressed(mapping.unlock_switch)) {
+      if (mapping.destination && switches_.pressed(mapping.unlock_switch)) {
         if (mapping.unlock_switch == SWITCH_T_RANGE && new_value < 0.1f) {
           new_value = 0.0f;
         }
