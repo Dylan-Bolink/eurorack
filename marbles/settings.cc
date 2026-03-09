@@ -206,6 +206,7 @@ void Settings::Init() {
   state_.grids_sync_playheads = 0;
   state_.grids_loop_start_at_one = 0;
 
+  state_.t_rate_stored = 128;
   state_.grids_x = 0;
   state_.grids_y = 0;
   state_.grids_chaos = 128;

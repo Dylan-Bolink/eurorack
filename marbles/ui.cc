@@ -101,6 +101,7 @@ void Ui::Init(
   alternate_knob_mappings_[ADC_CHANNEL_DEJA_VU_LENGTH].destination = NULL; 
 
   setting_modification_flag_ = false;
+  grids_save_flag_ = false;
   output_test_mode_ = false;
   
   if (switches_.pressed_immediate(SWITCH_X_MODE)) {
@@ -131,10 +132,12 @@ void Ui::Poll() {
   State* s = settings_->mutable_state();
 
   if (s->t_model == marbles::T_GENERATOR_MODEL_GRIDS && prev_t_model != marbles::T_GENERATOR_MODEL_GRIDS) {
-    // Just entered Grids mode - capture current rate knob position for both tempo and HH density
-    uint8_t rate_knob = static_cast<uint8_t>(cv_reader_->channel(ADC_CHANNEL_T_RATE).unscaled_pot() * 255.0f);
-    s->t_rate_stored = rate_knob;
-    s->grids_hh_density = rate_knob;
+    // Just entered Grids mode (not on boot) - capture current rate
+    if (prev_t_model != 255) {
+      uint8_t rate_knob = static_cast<uint8_t>(cv_reader_->channel(ADC_CHANNEL_T_RATE).unscaled_pot() * 255.0f);
+      s->t_rate_stored = rate_knob;
+      s->grids_hh_density = rate_knob;
+    }
     grids_held_first = -1;
   }
   prev_t_model = s->t_model;
@@ -201,6 +204,14 @@ void Ui::Poll() {
     if (grids_held_first == SWITCH_X_MODE) {
       grids_held_first = switches_.pressed(SWITCH_T_MODEL) ? SWITCH_T_MODEL : -1;
     }
+  }
+
+  // Flush all pending state changes once both shift buttons are released
+  if (grids_save_flag_
+      && !switches_.pressed(SWITCH_X_MODE)
+      && !switches_.pressed(SWITCH_T_MODEL)) {
+    grids_save_flag_ = false;
+    SaveState();
   }
 
   UpdateLEDs();
@@ -459,7 +470,7 @@ void Ui::OnSwitchReleased(const Event& e) {
         (e.control_id == SWITCH_X_MODE && switches_.pressed(SWITCH_T_RANGE))) {
       ignore_release_[SWITCH_X_MODE] = ignore_release_[SWITCH_T_RANGE] = true;
       state->grids_x_cv_swap = (state->grids_x_cv_swap + 1) % 3;
-      SaveState();
+      grids_save_flag_ = true;
       return;
     }
 
@@ -467,7 +478,7 @@ void Ui::OnSwitchReleased(const Event& e) {
         (e.control_id == SWITCH_X_MODE && switches_.pressed(SWITCH_X_EXT))) {
       ignore_release_[SWITCH_X_MODE] = ignore_release_[SWITCH_X_EXT] = true;
       state->grids_chaos_cv_swap = (state->grids_chaos_cv_swap + 1) % 3;
-      SaveState();
+      grids_save_flag_ = true;
       return;
     }
 
@@ -475,7 +486,7 @@ void Ui::OnSwitchReleased(const Event& e) {
         (e.control_id == SWITCH_X_MODE && switches_.pressed(SWITCH_X_RANGE))) {
       ignore_release_[SWITCH_X_MODE] = ignore_release_[SWITCH_X_RANGE] = true;
       state->grids_y_cv_swap = (state->grids_y_cv_swap + 1) % 3;
-      SaveState();
+      grids_save_flag_ = true;
       return;
     }
 
@@ -484,7 +495,7 @@ void Ui::OnSwitchReleased(const Event& e) {
         (e.control_id == SWITCH_X_MODE && switches_.pressed(SWITCH_T_DEJA_VU))) {
         ignore_release_[SWITCH_X_MODE] = ignore_release_[SWITCH_T_DEJA_VU] = true;
         state->deja_vu_t_cv_swap = !state->deja_vu_t_cv_swap;
-        SaveState();
+        grids_save_flag_ = true;
         return;
     }
 
@@ -493,7 +504,7 @@ void Ui::OnSwitchReleased(const Event& e) {
         (e.control_id == SWITCH_X_MODE && switches_.pressed(SWITCH_X_DEJA_VU))) {
         ignore_release_[SWITCH_X_MODE] = ignore_release_[SWITCH_X_DEJA_VU] = true;
         state->deja_vu_x_cv_swap = !state->deja_vu_x_cv_swap;
-        SaveState();
+        grids_save_flag_ = true;
         return;
     }
   }
@@ -507,7 +518,7 @@ void Ui::OnSwitchReleased(const Event& e) {
       combined = (combined + 1) % 6;
       state->grids_bank = combined % 3;
       state->grids_interpolation = (combined < 3) ? 1 : 0;
-      SaveState();
+      grids_save_flag_ = true;
       return;
     }
   }
@@ -520,8 +531,10 @@ void Ui::OnSwitchReleased(const Event& e) {
       state->explicit_reset = !state->explicit_reset;
       if (!is_grids) {
         mode_ = UI_MODE_DISPLAY_RESET_MODE;
+        SaveState();
+      } else {
+        grids_save_flag_ = true;
       }
-      SaveState();
       return;
     }
   }
@@ -531,31 +544,31 @@ void Ui::OnSwitchReleased(const Event& e) {
     if (e.control_id == SWITCH_T_RANGE) {
       ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_T_RANGE] = true;
       state->grids_henri = !state->grids_henri;
-      SaveState();
+      grids_save_flag_ = true;
       return;
     }
     if (e.control_id == SWITCH_X_EXT) {
       ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_EXT] = true;
       state->grids_accent_hang = !state->grids_accent_hang;
-      SaveState();
+      grids_save_flag_ = true;
       return;
     }
     if (e.control_id == SWITCH_T_DEJA_VU) {
       ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_T_DEJA_VU] = true;
       state->grids_sync_playheads = !state->grids_sync_playheads;
-      SaveState();
+      grids_save_flag_ = true;
       return;
     }
     if (e.control_id == SWITCH_X_DEJA_VU) {
       ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_DEJA_VU] = true;
       state->grids_loop_start_at_one = !state->grids_loop_start_at_one;
-      SaveState();
+      grids_save_flag_ = true;
       return;
     }
     if (e.control_id == SWITCH_X_MODE) {
       ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_MODE] = true;
       state->explicit_reset = !state->explicit_reset;
-      SaveState();
+      grids_save_flag_ = true;
       return;
     }
   }
@@ -723,12 +736,14 @@ void Ui::UpdateHiddenParameters() {
           state->grids_swing = static_cast<uint8_t>(new_value * 255.0f);
           cv_reader_->mutable_channel(i)->LockPot();
           setting_modification_flag_ = true;
+          grids_save_flag_ = true;
           continue;
         } else if (switches_.pressed(SWITCH_T_MODEL)) {
           // T Model + Jitter = pulse width
           state->t_pulse_width_std = static_cast<uint8_t>(new_value * 255.0f);
           cv_reader_->mutable_channel(i)->LockPot();
           setting_modification_flag_ = true;
+          grids_save_flag_ = true;
           continue;
         }
       }
@@ -739,12 +754,14 @@ void Ui::UpdateHiddenParameters() {
           state->grids_groove_offset = static_cast<uint8_t>(new_value * 255.0f);
           cv_reader_->mutable_channel(i)->LockPot();
           setting_modification_flag_ = true;
+          grids_save_flag_ = true;
           continue;
         } else if (switches_.pressed(SWITCH_T_MODEL)) {
           // T Model + Bias = pulse width mean
           state->t_pulse_width_mean = static_cast<uint8_t>(new_value * 255.0f);
           cv_reader_->mutable_channel(i)->LockPot();
           setting_modification_flag_ = true;
+          grids_save_flag_ = true;
           continue;
         }
       }
@@ -768,6 +785,7 @@ void Ui::UpdateHiddenParameters() {
 
         // The next time a switch is released, we unlock the pots.
         setting_modification_flag_ = true;
+        grids_save_flag_ = true;
       }
     }
   }
