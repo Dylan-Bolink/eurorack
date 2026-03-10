@@ -29,10 +29,8 @@ static inline uint8_t U8Mix(uint8_t a, uint8_t b, uint8_t balance) {
   return t >> 8;
 }
 
-
-
 /* static */
-const uint8_t* drum_map[3][5][5] = {
+static const uint8_t* const drum_map[3][5][5] = {
   // Bank 0: OG Grids (curated layout)
   {
     { node_10, node_8, node_0, node_9, node_11 },
@@ -94,11 +92,12 @@ uint8_t PatternGenerator::ReadDrumMap(
   uint8_t d = pgm_read_byte(d_map + offset);
 
   if (henri_) {
-    uint8_t hx = x >> 1;  // 0-127
-    uint8_t hy = y >> 1;
+    // Match Grids4Live: use global coordinates as blend weights (not local cell fractions)
+    uint8_t gx = x >> 1;  // scale 0-255 to 0-127
+    uint8_t gy = y >> 1;
     const uint16_t maxVal = 127;
-    uint32_t r = ((uint32_t)(a * hx + b * (maxVal - hx)) * hy
-                + (uint32_t)(c * hx + d * (maxVal - hx)) * (maxVal - hy))
+    uint32_t r = ((uint32_t)(a * gx + b * (maxVal - gx)) * gy
+                + (uint32_t)(c * gx + d * (maxVal - gx)) * (maxVal - gy))
                 / maxVal / maxVal;
     return static_cast<uint8_t>(r > 255 ? 255 : r);
   }

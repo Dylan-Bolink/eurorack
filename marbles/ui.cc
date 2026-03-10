@@ -540,7 +540,7 @@ void Ui::OnSwitchReleased(const Event& e) {
   }
 
   // Grids advanced settings: T_MODEL held + button tap
-  if (state->t_model == T_GENERATOR_MODEL_GRIDS && switches_.pressed(SWITCH_T_MODEL)) {
+  if (state->t_model == T_GENERATOR_MODEL_GRIDS && switches_.pressed(SWITCH_T_MODEL) && grids_held_first == SWITCH_T_MODEL) {
     if (e.control_id == SWITCH_T_RANGE) {
       ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_T_RANGE] = true;
       state->grids_henri = !state->grids_henri;

@@ -169,7 +169,6 @@ void TGenerator::Init(RandomStream* random_stream, float sr) {
   groove_delay_countdown_ = 0;
   groove_delay_for_t1_ = true;
 
-  grids_accent_hang_ = false;
   grids_sync_playheads_ = false;
   grids_loop_start_at_one_ = false;
   grids_free_step_ = 0;

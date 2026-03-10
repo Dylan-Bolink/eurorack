@@ -219,7 +219,7 @@ Ramps ramps;
 GroupSettings x, y;
 bool gate_delay_tail[kNumGateOutputs][kGateDelay];
 bool accent_cv_delay_tail[kGateDelay] = {false, false};
-float held_accent_voltage = 5.0f;
+float held_accent_voltage = 0.0f;
 
 float SineOscillator(float voltage) {
   static float phase = 0.0f;
@@ -358,7 +358,6 @@ void Process(IOBuffer::Block* block, size_t size) {
     t_generator.set_grids_interpolation(state.grids_interpolation);
     t_generator.set_grids_bank(state.grids_bank);
     t_generator.set_grids_henri(state.grids_henri);
-    t_generator.set_grids_accent_hang(state.grids_accent_hang);
     t_generator.set_grids_sync_playheads(state.grids_sync_playheads);
     t_generator.set_grids_loop_start_at_one(state.grids_loop_start_at_one);
 

@@ -235,7 +235,15 @@ void Settings::Init() {
     CONSTRAIN(state_.t_deja_vu, DEJA_VU_OFF, DEJA_VU_LOCKED);
     CONSTRAIN(state_.x_deja_vu, DEJA_VU_OFF, DEJA_VU_LOCKED);
     CONSTRAIN(state_.grids_bank, 0, 2);
-    
+    CONSTRAIN(state_.grids_interpolation, 0, 1);
+    CONSTRAIN(state_.grids_henri, 0, 1);
+    CONSTRAIN(state_.grids_accent_hang, 0, 1);
+    CONSTRAIN(state_.grids_sync_playheads, 0, 1);
+    CONSTRAIN(state_.grids_loop_start_at_one, 0, 1);
+    CONSTRAIN(state_.grids_x_cv_swap, 0, 2);
+    CONSTRAIN(state_.grids_y_cv_swap, 0, 2);
+    CONSTRAIN(state_.grids_chaos_cv_swap, 0, 2);
+
     CalibrationData& c = persistent_data_.calibration_data;
     for (size_t i = 0; i < ADC_CHANNEL_LAST; ++i) {
       if (i == ADC_CHANNEL_T_RATE) {

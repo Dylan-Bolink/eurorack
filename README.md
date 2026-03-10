@@ -8,7 +8,7 @@ A reimagining of Mutable Instruments [**_Grids_**](https://pichenettes.github.io
 
 Long press **T Mode** while on drum mode (solid red) to enter Grids mode (blinking red).
 
-> To exit long press **T Mode** without changing anything in the advanced layer.
+> To exit, long press **T Mode** without changing anything in the advanced layer.
 
 ## Outputs
 
@@ -133,7 +133,7 @@ Change the pattern coordinates on the current bank.
 
 | Position | Effect |
 |----------|--------|
-| **Left** | Random voltage window (1V-5V at far left, 4.9V-5V near noon) |
+| **Left** | Random voltage window (0V-5V at far left, 4.9V-5V near noon) |
 | **Noon** | Standard 5V gates |
 | **Right** | Velocity-sensitive gates (voltage follows accent level) |
 

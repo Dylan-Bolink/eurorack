@@ -202,10 +202,6 @@ class TGenerator {
     grids_.SetHenri(henri);
   }
 
-  void set_grids_accent_hang(bool hang) {
-    grids_accent_hang_ = hang;
-  }
-
   void set_grids_sync_playheads(bool sync) {
     grids_sync_playheads_ = sync;
   }
@@ -332,9 +328,8 @@ class TGenerator {
   SlaveRamp hh_slave_ramp_;
   SlaveRamp accent_slave_ramp_;
 
-  bool grids_accent_hang_;
   bool grids_sync_playheads_;
-  bool grids_loop_start_at_one_;
+  uint8_t grids_loop_start_at_one_;
   uint8_t grids_free_step_;  // shadow counter for sync playheads
   uint8_t grids_part_perturbation_[3];  // per-instrument chaos, set at step 0
 
