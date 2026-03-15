@@ -620,6 +620,11 @@ void TGenerator::Process(bool use_external_clock, bool* reset, const GateFlags* 
       drum_pattern_step_ = 33;
       grids_loop_start_ = 0;
 
+      // Experimental reset addition: clear out any stored step replacements on reset to avoid stuck steps
+      master_phase_ = 0.0f;
+      jitter_multiplier_ = 1.0f;
+      previous_external_ramp_value_ = *ramps.external;
+
       if (model_ != T_GENERATOR_MODEL_DIVIDER) {
           RandomVector rv;
           sequence_.NextVector(rv.x, sizeof(rv.x) / sizeof(float));

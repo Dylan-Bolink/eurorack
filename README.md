@@ -49,7 +49,7 @@ The Deja Vu section controls pattern looping:
 | Direction | Effect |
 |-----------|--------|
 | **Left of noon** | Chance to shift loop start point +1 step each cycle |
-| **Noon** | Neutral - no variation |
+| **Noon** | Neutral |
 | **Right of noon** | Chance for density drift on steps (clears when unlocked) |
 
 > When the knob is fully left or right the chance is 100%.
@@ -80,7 +80,7 @@ The Deja Vu section controls pattern looping:
 | **Far left** | Kick +3 steps late |
 | **Center left** | Kick +1 and +2 steps late |
 | **Left** | Kick micro-timing late (up to 50%) |
-| **Noon** | Neutral (on beat) |
+| **Noon** | Neutral |
 | **Right** | Snare micro-timing late (up to 50%) |
 | **Center right** | Snare +1 and +2 steps late |
 | **Far right** | Snare +3 steps late |
@@ -93,11 +93,11 @@ The same Rate/tempo control from the standard Marbles interface, moved here to f
 
 | Position | Effect |
 |----------|--------|
-| **Left** | Paired swing - classic shuffle |
-| **Noon** | No swing |
-| **Right** | Triplet swing |
+| **Left** | Classic swing |
+| **Noon** | Neutral |
+| **Right** | Tresillo swing |
 
-> Both swings go to 50% max
+> Both swings go to 50% max.
 
 ### Map X & Map Y
 
@@ -110,8 +110,8 @@ Change the pattern coordinates on the current bank.
 | Position | Effect |
 |----------|--------|
 | **Left** | Random tempo jitter (humanize) |
-| **Noon** | No chaos |
-| **Right** | Density chaos (ghost notes / fills) |
+| **Noon** | Neutral |
+| **Right** | Density Chaos (ghost notes / fills) |
 
 > The left side of the chaos knob uses the normal Jitter logic from the other modes.
 
@@ -122,7 +122,7 @@ Change the pattern coordinates on the current bank.
 | **Far left** | Kick accent only |
 | **Left** | Hi-hat accent only |
 | **Center-left** | Snare accent only |
-| **Noon** | All accents combined |
+| **Noon** | All accents combined (original behaviour) |
 | **Right to far right** | All accents combined, lowering threshold |
 
 > 192 is the original grids threshold for an accent and is used on the left to noon side of the knob.
@@ -134,7 +134,7 @@ Change the pattern coordinates on the current bank.
 | Position | Effect |
 |----------|--------|
 | **Left** | Random voltage window (0V-5V at far left, 4.9V-5V near noon) |
-| **Noon** | Standard 5V gates |
+| **Noon** | Neutral (5v gates) |
 | **Right** | Velocity-sensitive gates (voltage follows accent level) |
 
 <br><br>
@@ -158,7 +158,7 @@ Hold **X Mode** + tap **T Model** to cycle through pattern banks:
 | Blinking Orange | Electronic (no interpolation) |
 | Blinking Red | Breakbeat (no interpolation) |
 
-> **Interpolation vs No Interpolation:** With interpolation (solid LED), patterns morph smoothly between the 25 positions in the 5x5 grid as you adjust Map X/Y. Without interpolation (blinking LED), Map X/Y snap to the nearest of the 25 grid positions — no morphing, just the raw patterns.
+> **Interpolation vs No Interpolation:** With interpolation (solid LED), patterns morph smoothly between the 25 positions in the 5x5 grid as you adjust Map X/Y (Same as the original Grids). Without interpolation (blinking LED), Map X/Y snap to the nearest of the 25 grid positions — no morphing, just the raw patterns.
 
 ### CV Swap Routing
 
