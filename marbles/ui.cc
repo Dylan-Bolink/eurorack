@@ -337,9 +337,6 @@ void Ui::UpdateLEDs() {
                 : (interp_blink ? bank_color : LED_COLOR_OFF));
           }
 
-          // X mode LED: explicit reset status (yellow=ON, off=OFF)
-          leds_.set(LED_X_CONTROL_MODE, state.explicit_reset ? LED_COLOR_YELLOW : LED_COLOR_OFF);
-
           // T deja vu lock CV swap
           LedColor t_dv_color = LED_COLOR_OFF;
           if (state.deja_vu_t_cv_swap) t_dv_color = LED_COLOR_GREEN;
@@ -633,8 +630,11 @@ void Ui::OnSwitchReleased(const Event& e) {
       break;
     
     case SWITCH_X_MODE:
-      state->x_control_mode = (state->x_control_mode + 1) % 3;
-      SaveState();
+      // In Grids mode, only cycle on short tap
+      if (state->t_model != T_GENERATOR_MODEL_GRIDS || e.data < 275) {
+        state->x_control_mode = (state->x_control_mode + 1) % 3;
+        SaveState();
+      }
       break;
       
     case SWITCH_X_EXT:

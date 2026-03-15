@@ -234,10 +234,10 @@ class TGenerator {
     // Explicit reset: jump to loop start (or 0 if no loop)
     if (reset_active) {
       if (active) {
-        drum_pattern_step_ = grids_loop_start_;
+        drum_pattern_step_ = (grids_loop_start_ + 31) % 32;
       } else {
-        drum_pattern_step_ = 0;
-        grids_free_step_ = 0;
+        drum_pattern_step_ = 31;
+        grids_free_step_ = 31;
       }
     }
 
@@ -310,6 +310,7 @@ class TGenerator {
   size_t sample_index_;
 
   float grids_swing_;
+  float grids_swing_latched_;
   uint8_t grids_accent_threshold_;
   uint8_t grids_accent_mode_;  // 0=kick, 1=hh, 2=snare, 3=all
   bool grids_interpolation_;

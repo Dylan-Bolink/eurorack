@@ -153,6 +153,7 @@ void TGenerator::Init(RandomStream* random_stream, float sr) {
   current_period_ = 0.0f;
 
   grids_swing_ = 0.0f;
+  grids_swing_latched_ = 0.0f;
   grids_accent_threshold_ = 192; // Default OG grids value
   grids_accent_mode_ = 3;  // All
   grids_interpolation_ = true;  // Default smooth
@@ -332,6 +333,11 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
     if (drum_pattern_step_ >= 32) drum_pattern_step_ = 0;
   }
 
+  // Latch swing every 4 steps to smooth out knob changes
+  if ((drum_pattern_step_ % 4) == 0) {
+    grids_swing_latched_ = grids_swing_;
+  }
+
   uint8_t read_step = drum_pattern_step_ % 32;
   uint8_t x_u8, y_u8;
 
@@ -373,15 +379,11 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
       ? static_cast<uint8_t>(grids_chaos_ * 64.0f)
       : 0;
 
-  //read_step normal 32-step cycle wrap
-  //loop_wrapped loop boundary when locked loop
-  // chaos_amt == 0 immediate reset when chaos is turned off
-  if (read_step == 0 || loop_wrapped || chaos_amt == 0) {
-    grids_part_perturbation_[0] = static_cast<uint8_t>(x.variables.u[0] * chaos_amt);
-    grids_part_perturbation_[1] = static_cast<uint8_t>(x.variables.u[1] * chaos_amt);
-    grids_part_perturbation_[2] = static_cast<uint8_t>(
-        (x.variables.u[0] + x.variables.u[1]) * 0.5f * chaos_amt);
-  }
+  // Per-step chaos: fresh random perturbation each step
+  grids_part_perturbation_[0] = static_cast<uint8_t>(x.variables.u[0] * chaos_amt);
+  grids_part_perturbation_[1] = static_cast<uint8_t>(x.variables.u[1] * chaos_amt);
+  grids_part_perturbation_[2] = static_cast<uint8_t>(
+      (x.variables.u[0] + x.variables.u[1]) * 0.5f * chaos_amt);
   uint8_t* p = grids_part_perturbation_;
 
   // Right density drifting
@@ -460,13 +462,16 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
 
   // mirrors Process() logic for capped swing + microtiming
   float swing_fraction = 0.0f;
-  if (grids_swing_ != 0.0f) {
-    float swing_amount = fabsf(grids_swing_);
+  if (grids_swing_latched_ != 0.0f) {
+    float swing_amount = fabsf(grids_swing_latched_);
     bool step_is_swung;
-    if (grids_swing_ < 0.0f) {
-      step_is_swung = (drum_pattern_step_ & 2);  // pair swing
+    if (grids_swing_latched_ < 0.0f) {
+      step_is_swung = (drum_pattern_step_ & 2);  // classic swing
     } else {
-      step_is_swung = ((drum_pattern_step_ % 3) == 2);  // triplet
+      {  // tresillo 3-3-2 swing
+        static const uint8_t kTresillo = 0xA4;  // bits 2,5,7
+        step_is_swung = (kTresillo >> ((drum_pattern_step_ >> 1) & 7)) & 1;
+      }
     }
     if (step_is_swung) {
       swing_fraction = swing_amount * 0.5f;
@@ -612,7 +617,7 @@ void TGenerator::Process(bool use_external_clock, bool* reset, const GateFlags* 
       hh_slave_ramp_.Reset();
       accent_slave_ramp_.Reset(); 
       sequence_.Reset();
-      drum_pattern_step_ = 0;
+      drum_pattern_step_ = 33;
       grids_loop_start_ = 0;
 
       if (model_ != T_GENERATOR_MODEL_DIVIDER) {
@@ -636,16 +641,18 @@ void TGenerator::Process(bool use_external_clock, bool* reset, const GateFlags* 
     if (master_phase_ > 1.0f) {
       // Calculate swing threshold
       float swing_threshold = 1.0f;
-      if (model_ == T_GENERATOR_MODEL_GRIDS && grids_swing_ != 0.0f) {
+      if (model_ == T_GENERATOR_MODEL_GRIDS && grids_swing_latched_ != 0.0f) {
           size_t next_step = (drum_pattern_step_ + 1) % 32;
-          float swing_amount = fabsf(grids_swing_);
+          float swing_amount = fabsf(grids_swing_latched_);
           bool next_is_swung;
-          if (grids_swing_ < 0.0f) {
-              // Left: pair swing
+          if (grids_swing_latched_ < 0.0f) {
+              // Left: classic swing
               next_is_swung = (next_step & 2);
           } else {
-              // Right: triplet swing
-              next_is_swung = ((next_step % 3) == 2);
+              {  // Right: tresillo 3-3-2 swing
+                static const uint8_t kTresillo = 0xA4;  // bits 2,5,7
+                next_is_swung = (kTresillo >> ((next_step >> 1) & 7)) & 1;
+              }
           }
           if (next_is_swung) {
             // Delay up to 50% of step duration

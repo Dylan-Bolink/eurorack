@@ -41,19 +41,19 @@ static const uint8_t* const drum_map[3][5][5] = {
   },
   // Bank 1: Electronic
   {
-    { node_25, node_26, node_27, node_28, node_29 },
-    { node_30, node_31, node_32, node_33, node_34 },
-    { node_35, node_36, node_37, node_38, node_39 },
-    { node_40, node_41, node_42, node_43, node_44 },
-    { node_45, node_46, node_47, node_48, node_49 },
+    { node_39, node_26, node_25, node_29, node_33 },  // X=0: Synthwave→Deep House→4/4 House→Disco→Hard Techno (all 4otf)
+    { node_30, node_31, node_27, node_28, node_34 },  // X=1: Min Techno→Detroit→Tech House→Acid House→Gabber
+    { node_38, node_40, node_35, node_46, node_32 },  // X=2: Electro 808→Old Breaks→UK Garage→Grime→Industrial
+    { node_45, node_36, node_43, node_42, node_48 },  // X=3: Dubstep→2-Step→Halftime DnB→DnB→Footwork
+    { node_44, node_37, node_47, node_41, node_49 },  // X=4: IDM→Broken Beat→UK Bass→Jungle→Juke
   },
   // Bank 2: Breakbeat
   {
-    { node_50, node_51, node_52, node_53, node_54 },
-    { node_55, node_56, node_57, node_58, node_59 },
-    { node_60, node_61, node_62, node_63, node_64 },
-    { node_65, node_66, node_67, node_68, node_69 },
-    { node_70, node_71, node_72, node_73, node_74 },
+    { node_73, node_52, node_72, node_70, node_71 },  // X=0: Neo Soul→Jazz Rap→Soul/R&B→Old Funk→Breakbeat
+    { node_53, node_50, node_51, node_54, node_74 },  // X=1: Lo-Fi→Classic BB→NY BB→Abstract HH→Jersey Club
+    { node_55, node_59, node_56, node_57, node_58 },  // X=2: G-Funk→Snap→Hyphy→Bounce→Crunk
+    { node_64, node_60, node_61, node_62, node_63 },  // X=3: Plugg→Trap→Hard Trap→Chi Drill→UK Drill
+    { node_68, node_69, node_67, node_65, node_66 },  // X=4: Amapiano→Dancehall→Afrobeats→Reggaeton→Dembow
   },
 };
 

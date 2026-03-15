@@ -1,4 +1,5 @@
 #!/usr/bin/python2.5
+# -*- coding: utf-8 -*-
 #
 # Copyright 2012 Emilie Gillet.
 #
