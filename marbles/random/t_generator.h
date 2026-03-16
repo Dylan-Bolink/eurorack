@@ -223,7 +223,6 @@ class TGenerator {
         grids_step_replacement_[i] = 0xFF;
       }
       drift_order_head_ = 0;
-      drift_order_count_ = 0;
     }
 
     // On unlock: sync playhead if enabled
@@ -338,9 +337,7 @@ class TGenerator {
   bool prev_deja_vu_active_;
   uint8_t grids_step_replacement_[32];
 
-  uint8_t drift_order_[8];
   size_t drift_order_head_;
-  size_t drift_order_count_;
 
   bool use_external_clock_;
 

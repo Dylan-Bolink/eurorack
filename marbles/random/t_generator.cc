@@ -32,9 +32,11 @@
 #include "marbles/resources.h"
 
 namespace marbles {
-  
+
 using namespace std;
 using namespace stmlib;
+
+const float kDeadband = kDeadband;
 
 /* static */
 DividerPattern TGenerator::divider_patterns[kNumDividerPatterns] = {
@@ -179,7 +181,6 @@ void TGenerator::Init(RandomStream* random_stream, float sr) {
   prev_deja_vu_active_ = false;
   fill(&grids_step_replacement_[0], &grids_step_replacement_[32], 0xFF);
   drift_order_head_ = 0;
-  drift_order_count_ = 0;
 
   sample_index_ = 0;
   fill(&hh_gate_buffer_[0], &hh_gate_buffer_[kBlockSize], false);
@@ -358,18 +359,18 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
   // Parse groove offset into step offset or micro-timing
   int kick_step_offset = 0, snare_step_offset = 0;
   float kick_micro = 0.0f, snare_micro = 0.0f;
-  if (grids_groove_offset_ < -0.06f) {
+  if (grids_groove_offset_ < -kDeadband) {
     float amt = -grids_groove_offset_;
     if (amt >= 0.87f) kick_step_offset = 3;
     else if (amt >= 0.73f) kick_step_offset = 2;
     else if (amt >= 0.60f) kick_step_offset = 1;
-    else kick_micro = (amt - 0.06f) / 0.54f * 0.5f;
-  } else if (grids_groove_offset_ > 0.06f) {
+    else kick_micro = (amt - kDeadband) / 0.54f * 0.5f;
+  } else if (grids_groove_offset_ > kDeadband) {
     float amt = grids_groove_offset_;
     if (amt >= 0.87f) snare_step_offset = 3;
     else if (amt >= 0.73f) snare_step_offset = 2;
     else if (amt >= 0.60f) snare_step_offset = 1;
-    else snare_micro = (amt - 0.06f) / 0.54f * 0.5f;
+    else snare_micro = (amt - kDeadband) / 0.54f * 0.5f;
   }
 
   uint8_t kick_read = (read_step - kick_step_offset + 32) % 32;

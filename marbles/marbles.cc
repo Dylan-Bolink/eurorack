@@ -62,6 +62,7 @@ const bool test_adc_noise = false;
 
 const int kSampleRate = 32000;
 const int kGateDelay = 2;
+const float kDeadband = 0.06f;
 
 float grids_chaos = 0.0f;
 int grids_length_ = 32;
@@ -329,7 +330,7 @@ void Process(IOBuffer::Block* block, size_t size) {
   if (grids_mode) {
     float swing_raw = static_cast<float>(state.grids_swing) / 255.0f;
     float swing = (swing_raw - 0.5f) * 2.0f;
-    if (fabsf(swing) < 0.06f) swing = 0.0f; // deadband check
+    if (fabsf(swing) < kDeadband) swing = 0.0f; // deadband check
     t_generator.set_grids_swing(swing);
 
     // left = channel select, center = all @ 192, right = lower threshold
@@ -363,7 +364,7 @@ void Process(IOBuffer::Block* block, size_t size) {
 
     float groove_raw = static_cast<float>(state.grids_groove_offset) / 255.0f;
     float groove = (groove_raw - 0.5f) * 2.0f;
-    if (fabsf(groove) < 0.06f) groove = 0.0f;
+    if (fabsf(groove) < kDeadband) groove = 0.0f;
     t_generator.set_grids_groove_offset(groove);
 
     float rate_normalized = static_cast<float>(state.t_rate_stored) / 255.0f;
@@ -399,7 +400,7 @@ void Process(IOBuffer::Block* block, size_t size) {
         final_chaos += cv_reader.channel(ADC_CHANNEL_T_RATE).cv() / 60.0f;
         CONSTRAIN(final_chaos, -1.0f, 1.0f);
     }
-    if (fabsf(final_chaos) < 0.06f) final_chaos = 0.0f;
+    if (fabsf(final_chaos) < kDeadband) final_chaos = 0.0f;
 
     t_generator.set_grids_coordinates(final_x, final_y, final_chaos);
 
