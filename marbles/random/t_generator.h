@@ -338,6 +338,7 @@ class TGenerator {
   uint8_t grids_step_replacement_[32];
 
   size_t drift_order_head_;
+  uint32_t chaos_rng_state_;
 
   bool use_external_clock_;
 

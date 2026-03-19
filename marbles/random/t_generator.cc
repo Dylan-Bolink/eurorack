@@ -181,6 +181,7 @@ void TGenerator::Init(RandomStream* random_stream, float sr) {
   prev_deja_vu_active_ = false;
   fill(&grids_step_replacement_[0], &grids_step_replacement_[32], 0xFF);
   drift_order_head_ = 0;
+  chaos_rng_state_ = 1;
 
   sample_index_ = 0;
   fill(&hh_gate_buffer_[0], &hh_gate_buffer_[kBlockSize], false);
@@ -377,14 +378,14 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
   uint8_t snare_read = (read_step - snare_step_offset + 32) % 32;
 
   uint8_t chaos_amt = (grids_chaos_ > 0.0f)
-      ? static_cast<uint8_t>(grids_chaos_ * 64.0f)
+      ? static_cast<uint8_t>(grids_chaos_ * 255.0f)
       : 0;
 
   // Per-step chaos: fresh random perturbation each step
-  grids_part_perturbation_[0] = static_cast<uint8_t>(x.variables.u[0] * chaos_amt);
-  grids_part_perturbation_[1] = static_cast<uint8_t>(x.variables.u[1] * chaos_amt);
-  grids_part_perturbation_[2] = static_cast<uint8_t>(
-      (x.variables.u[0] + x.variables.u[1]) * 0.5f * chaos_amt);
+  chaos_rng_state_ = chaos_rng_state_ * 1664525u + 1013904223u;
+  grids_part_perturbation_[0] = ((chaos_rng_state_ >> 0) & 0xFF) * chaos_amt >> 8;
+  grids_part_perturbation_[1] = ((chaos_rng_state_ >> 8) & 0xFF) * chaos_amt >> 8;
+  grids_part_perturbation_[2] = ((chaos_rng_state_ >> 16) & 0xFF) * chaos_amt >> 8;
   uint8_t* p = grids_part_perturbation_;
 
   // Right density drifting
@@ -394,7 +395,8 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
     float deja_vu_amount = sequence_.deja_vu();
 
     if (deja_vu_amount > 0.53f) {
-      float drift_probability = ((deja_vu_amount - 0.53f) / 0.47f) * 0.50f;
+      float drift_rate = (deja_vu_amount - 0.53f) / 0.47f;
+      float drift_probability = drift_rate * drift_rate * 0.50f;
 
       if (x.variables.u[0] < drift_probability) {
         size_t max_drifts = len / 2;
@@ -636,7 +638,7 @@ void TGenerator::Process(bool use_external_clock, bool* reset, const GateFlags* 
   while (size--) {
     float frequency = use_external_clock ? *ramps.external - previous_external_ramp_value_ : internal_frequency;
     frequency += frequency < 0.0f ? 1.0f : 0.0f;
-    float j_mult = (model_ == T_GENERATOR_MODEL_GRIDS && grids_chaos_ >= 0.0f) ? 1.0f : jitter_multiplier_;
+    float j_mult = (model_ == T_GENERATOR_MODEL_GRIDS && grids_chaos_ > -kDeadband) ? 1.0f : jitter_multiplier_;
     float jittery_freq = frequency * j_mult;
     master_phase_ += jittery_freq;
 
@@ -672,9 +674,9 @@ void TGenerator::Process(bool use_external_clock, bool* reset, const GateFlags* 
         sequence_.NextVector(rv.x, sizeof(rv.x) / sizeof(float));
 
         float jitter_amount;
-        if (model_ == T_GENERATOR_MODEL_GRIDS && grids_chaos_ < 0.0f) {
+        if (model_ == T_GENERATOR_MODEL_GRIDS && grids_chaos_ < -kDeadband) {
             float slop = fabsf(grids_chaos_);
-            jitter_amount = slop * slop * slop * slop * 36.0f;
+            jitter_amount = slop * slop * slop * slop * 18.0f;
         } else {
             jitter_amount = jitter_ * jitter_ * jitter_ * jitter_ * 36.0f;
         }

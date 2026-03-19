@@ -36,7 +36,7 @@ Long press **T Mode** while on drum mode (solid red) to enter Grids mode (blinki
 
 > All three respond to CV input.
 
-### Deja Vu (T Side)
+### Déjà Vu (T Side)
 
 The Deja Vu section controls pattern looping:
 
@@ -62,18 +62,7 @@ The Deja Vu section controls pattern looping:
 
 <img src="images/truchets_cheatsheet_2.png" style="width:500px;">
 
-| Hold X Mode + Turn | Controls |
-|--------------------|----------|
-| **Bias (T)** | Groove offset |
-| **Rate** | Rate |
-| **Jitter** | Swing |
-| **Steps** | Map X |
-| **Bias (X)** | Map Y |
-| **Spread** | Chaos |
-| **Deja Vu Amount** | Accent control |
-| **Deja Vu Length** | Accent variation |
-
-### Groove Offset
+### Groove Offset (x Bias)
 
 | Position | Effect |
 |----------|--------|
@@ -85,11 +74,11 @@ The Deja Vu section controls pattern looping:
 | **Center right** | Snare +1 and +2 steps late |
 | **Far right** | Snare +3 steps late |
 
-### Rate
+### Rate (Rate)
 
 The same Rate/tempo control from the standard Marbles interface, moved here to free up the knob for hi-hat density.
 
-### Swing
+### Swing (Jitter)
 
 | Position | Effect |
 |----------|--------|
@@ -99,13 +88,13 @@ The same Rate/tempo control from the standard Marbles interface, moved here to f
 
 > Both swings go to 50% max.
 
-### Map X & Map Y
+### Map X & Map Y (Steps & x Bias)
 
 Change the pattern coordinates on the current bank. 
 
 > [Original Grids manual](https://pichenettes.github.io/mutable-instruments-documentation/modules/grids/manual/)
 
-### Chaos
+### Chaos (Spread)
 
 | Position | Effect |
 |----------|--------|
@@ -115,7 +104,7 @@ Change the pattern coordinates on the current bank.
 
 > The left side of the chaos knob uses the normal Jitter logic from the other modes.
 
-### Accent Control
+### Accent Control (Deja vu)
 
 | Position | Effect |
 |----------|--------|
@@ -129,7 +118,7 @@ Change the pattern coordinates on the current bank.
 
 > Lowering threshold creates more gates. If accent control is fully to the right an accent will always be fired when any of the outputs are firing.
 
-### Accent Variation
+### Accent Variation (Length)
 
 | Position | Effect |
 |----------|--------|
@@ -180,12 +169,12 @@ Hold **X Mode** + tap **T Model** to cycle through pattern banks:
 
 | Hold X Mode + Press | LED State | Function |
 |---------------------|-----------|----------|
-| **T Déjà Vu** | Off | Normal behavior |
-| | Green | Déjà Vu CV gates T-side lock |
-| **X Déjà Vu** | Off | Normal behavior |
-| | Green | Déjà Vu CV gates X-side lock |
+| **T Deja Vu** | Off | Normal behavior |
+| | Green | Deja Vu CV gates T-side lock |
+| **X Deja Vu** | Off | Normal behavior |
+| | Green | Deja Vu CV gates X-side lock |
 
-> When enabled, a **gate signal (+2.5V)** on the Déjà Vu CV input flips the lock state.
+> When enabled, a **gate signal (+2.5V)** on the Deja Vu CV input flips the lock state.
 
 <br><br>
 
@@ -223,6 +212,13 @@ When **on**, loops always start from step 1 of the pattern instead of the step w
 Original Marbles 1.3 setting. When enabled, reset input resets the pattern to step 1 or to the first step of the loop window when looped.
 
 > [1.3 manual](https://pichenettes.github.io/mutable-instruments-documentation/modules/marbles/firmware/#:~:text=Implicit%20and%20explicit,experience%20odd%20timing.)
+
+<br><br>
+
+#### Gate length control (t Bias & Jitter)
+While **Holding T Model** the gate configuration parameters are still accesible. 
+> [Marbles manual about gate configuration](https://arc.net/l/quote/heojrdjx)
+
 
 <br><br>
 
