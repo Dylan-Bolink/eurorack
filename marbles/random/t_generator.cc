@@ -179,8 +179,10 @@ void TGenerator::Init(RandomStream* random_stream, float sr) {
 
   grids_loop_start_ = 0;
   prev_deja_vu_active_ = false;
-  fill(&grids_step_replacement_[0], &grids_step_replacement_[32], 0xFF);
-  drift_order_head_ = 0;
+  for (size_t inst = 0; inst < 3; ++inst) {
+    fill(&grids_step_replacement_[inst][0], &grids_step_replacement_[inst][32], 0xFF);
+    drift_order_head_[inst] = 0;
+  }
   chaos_rng_state_ = 1;
 
   sample_index_ = 0;
@@ -293,7 +295,7 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
   size_t len = static_cast<size_t>(grids_length_);
   if (len < 1) len = 32;
 
-  const float kDead = 0.03f;
+  const float kDead = 0.02f;
   bool kick_trig = false;
   bool snare_trig = false;
   bool hh_trig = false;
@@ -377,19 +379,21 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
   uint8_t kick_read = (read_step - kick_step_offset + 32) % 32;
   uint8_t snare_read = (read_step - snare_step_offset + 32) % 32;
 
-  uint8_t chaos_amt = (grids_chaos_ > 0.0f)
-      ? static_cast<uint8_t>(grids_chaos_ * 255.0f)
-      : 0;
-
-  // Per-step chaos: fresh random perturbation each step
-  chaos_rng_state_ = chaos_rng_state_ * 1664525u + 1013904223u;
-  grids_part_perturbation_[0] = ((chaos_rng_state_ >> 0) & 0xFF) * chaos_amt >> 8;
-  grids_part_perturbation_[1] = ((chaos_rng_state_ >> 8) & 0xFF) * chaos_amt >> 8;
-  grids_part_perturbation_[2] = ((chaos_rng_state_ >> 16) & 0xFF) * chaos_amt >> 8;
+  // Recalculate perturbation once per cycle: on loop wrap (locked) or step 0 (free)
+  bool cycle_start = prev_deja_vu_active_ ? loop_wrapped : (read_step == 0);
+  if (cycle_start) {
+    uint8_t chaos_amt = (grids_chaos_ > 0.0f)
+        ? static_cast<uint8_t>(grids_chaos_ * 64.0f)
+        : 0;
+    chaos_rng_state_ = chaos_rng_state_ * 1664525u + 1013904223u;
+    grids_part_perturbation_[0] = ((chaos_rng_state_ >> 0) & 0xFF) * chaos_amt >> 8;
+    grids_part_perturbation_[1] = ((chaos_rng_state_ >> 8) & 0xFF) * chaos_amt >> 8;
+    grids_part_perturbation_[2] = ((chaos_rng_state_ >> 16) & 0xFF) * chaos_amt >> 8;
+  }
   uint8_t* p = grids_part_perturbation_;
 
   // Right density drifting
-  int8_t density_drift = 0;
+  int8_t density_drift[3] = {0, 0, 0};
 
   if (prev_deja_vu_active_ && len < 32) {
     float deja_vu_amount = sequence_.deja_vu();
@@ -398,36 +402,48 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
       float drift_rate = (deja_vu_amount - 0.53f) / 0.47f;
       float drift_probability = drift_rate * drift_rate * 0.50f;
 
-      if (x.variables.u[0] < drift_probability) {
-        size_t max_drifts = len / 2;
-        if (max_drifts < 1) max_drifts = 1;
+      size_t max_drifts = len / 2;
+      if (max_drifts < 1) max_drifts = 1;
 
-        size_t drift_count = 0;
-        for (size_t i = 0; i < 32; ++i) {
-          if (grids_step_replacement_[i] != 0xFF) drift_count++;
-        }
+      // Derive 3 random values from u[0] and u[1]
+      float drift_rand[3] = {
+        x.variables.u[0],
+        x.variables.u[1],
+        x.variables.u[0] + x.variables.u[1]
+      };
+      if (drift_rand[2] >= 1.0f) drift_rand[2] -= 1.0f;
 
-        // If at max, remove one using round-robin
-        if (drift_count >= max_drifts) {
-          for (size_t j = 0; j < 32; ++j) {
-            size_t idx = (drift_order_head_ + j) % 32;
-            if (grids_step_replacement_[idx] != 0xFF && idx != read_step) {
-              grids_step_replacement_[idx] = 0xFF;
-              drift_order_head_ = (idx + 1) % 32;
-              break;
+      for (size_t inst = 0; inst < 3; ++inst) {
+        if (drift_rand[inst] < drift_probability) {
+          size_t drift_count = 0;
+          for (size_t i = 0; i < 32; ++i) {
+            if (grids_step_replacement_[inst][i] != 0xFF) drift_count++;
+          }
+
+          // If at max, remove one using round-robin
+          if (drift_count >= max_drifts) {
+            for (size_t j = 0; j < 32; ++j) {
+              size_t idx = (drift_order_head_[inst] + j) % 32;
+              if (grids_step_replacement_[inst][idx] != 0xFF && idx != read_step) {
+                grids_step_replacement_[inst][idx] = 0xFF;
+                drift_order_head_[inst] = (idx + 1) % 32;
+                break;
+              }
             }
           }
-        }
 
-        // Set drift range: ±126 (~50% of threshold range)
-        int8_t drift = static_cast<int8_t>((x.variables.u[1] - 0.5f) * 252.0f);
-        grids_step_replacement_[read_step] = static_cast<uint8_t>(128 + drift);
+          // Set drift range: ±126 (~50% of threshold range)
+          int8_t drift = static_cast<int8_t>((drift_rand[inst] - 0.5f) * 252.0f);
+          grids_step_replacement_[inst][read_step] = static_cast<uint8_t>(128 + drift);
+        }
       }
     }
 
-    // Apply stored drift
-    if (grids_step_replacement_[read_step] != 0xFF) {
-      density_drift = static_cast<int8_t>(grids_step_replacement_[read_step]) - 128;
+    // Apply stored drifts
+    for (size_t inst = 0; inst < 3; ++inst) {
+      if (grids_step_replacement_[inst][read_step] != 0xFF) {
+        density_drift[inst] = static_cast<int8_t>(grids_step_replacement_[inst][read_step]) - 128;
+      }
     }
   }
 
@@ -436,7 +452,7 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
   if (dens_kick_ > kDead) {
     kick_lvl = grids_.ReadDrumMap(kick_read, 0, x_u8, y_u8);
     if (kick_lvl < (255 - p[0])) kick_lvl += p[0]; else kick_lvl = 255;
-    int thresh_i = static_cast<int>((1.0f - dens_kick_) * 255.0f) + density_drift;
+    int thresh_i = static_cast<int>((1.0f - dens_kick_) * 255.0f) + density_drift[0];
     if (thresh_i < 0) thresh_i = 0;
     if (thresh_i > 255) thresh_i = 255;
     kick_trig = (kick_lvl > thresh_i);
@@ -446,7 +462,7 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
   if (dens_snare_ > kDead) {
     snare_lvl = grids_.ReadDrumMap(snare_read, 1, x_u8, y_u8);
     if (snare_lvl < (255 - p[1])) snare_lvl += p[1]; else snare_lvl = 255;
-    int thresh_i = static_cast<int>((1.0f - dens_snare_) * 255.0f) + density_drift;
+    int thresh_i = static_cast<int>((1.0f - dens_snare_) * 255.0f) + density_drift[1];
     if (thresh_i < 0) thresh_i = 0;
     if (thresh_i > 255) thresh_i = 255;
     snare_trig = (snare_lvl > thresh_i);
@@ -456,7 +472,7 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
   if (dens_hh_ > kDead) {
     hh_lvl = grids_.ReadDrumMap(read_step, 2, x_u8, y_u8);
     if (hh_lvl < (255 - p[2])) hh_lvl += p[2]; else hh_lvl = 255;
-    int thresh_i = static_cast<int>((1.0f - dens_hh_) * 255.0f) + density_drift;
+    int thresh_i = static_cast<int>((1.0f - dens_hh_) * 255.0f) + density_drift[2];
     if (thresh_i < 0) thresh_i = 0;
     if (thresh_i > 255) thresh_i = 255;
     hh_trig = (hh_lvl > thresh_i);

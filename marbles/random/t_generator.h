@@ -219,10 +219,12 @@ class TGenerator {
           : (drum_pattern_step_ + 33 - len) % 32;
 
       // Clear step drifts on new lock
-      for (size_t i = 0; i < 32; ++i) {
-        grids_step_replacement_[i] = 0xFF;
+      for (size_t inst = 0; inst < 3; ++inst) {
+        for (size_t i = 0; i < 32; ++i) {
+          grids_step_replacement_[inst][i] = 0xFF;
+        }
+        drift_order_head_[inst] = 0;
       }
-      drift_order_head_ = 0;
     }
 
     // On unlock: sync playhead if enabled
@@ -335,9 +337,9 @@ class TGenerator {
 
   size_t grids_loop_start_;
   bool prev_deja_vu_active_;
-  uint8_t grids_step_replacement_[32];
+  uint8_t grids_step_replacement_[3][32];
 
-  size_t drift_order_head_;
+  size_t drift_order_head_[3];
   uint32_t chaos_rng_state_;
 
   bool use_external_clock_;

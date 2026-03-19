@@ -2,6 +2,31 @@
 
 A reimagining of Mutable Instruments [**_Grids_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/grids/) drum pattern generator, now living inside Marbles. Truchets is built on [**_Marbles 1.3_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/marbles/firmware/). All other modes still function the same as in the original firmware.
 
+<br>
+
+## Contents
+
+1. [Activating Grids Mode](#activating-grids-mode)
+2. [Outputs](#outputs)
+3. [Standard Controls](#standard-controls)
+   - [Density Knobs](#density-knobs)
+   - [Deja Vu (T Side)](#deja-vu-t-side)
+4. [X Shift Layer - Knobs](#y-shift-layer---knobs)
+   - [Groove Offset](#groove-offset-x-bias)
+   - [Rate](#rate-rate)
+   - [Swing](#swing-jitter)
+   - [Map X & Map Y](#map-x--map-y-steps--x-bias)
+   - [Chaos](#chaos-spread)
+   - [Accent Control](#accent-control-deja-vu)
+   - [Accent Variation](#accent-variation-length)
+5. [X Shift Layer - Buttons](#y-shift-layer---buttons)
+   - [Pattern Banks](#pattern-banks)
+   - [CV Swap Routing](#cv-swap-routing)
+   - [Deja Vu CV Swap](#deja-vu-cv-swap)
+6. [Advanced Settings Layer](#advanced-settings-layer)
+7. [Patching Ideas](#patching-ideas)
+8. [Credits](#credits)
+
 <br><br>
 
 ## Activating Grids Mode
@@ -36,7 +61,7 @@ Long press **T Mode** while on drum mode (solid red) to enter Grids mode (blinki
 
 > All three respond to CV input.
 
-### Déjà Vu (T Side)
+### Deja Vu (T Side)
 
 The Deja Vu section controls pattern looping:
 
@@ -48,17 +73,21 @@ The Deja Vu section controls pattern looping:
 
 | Direction | Effect |
 |-----------|--------|
-| **Left of noon** | Chance to shift loop start point +1 step each cycle |
+| **Left** | Chance to shift loop start point +1 step each cycle |
 | **Noon** | Neutral |
-| **Right of noon** | Chance for density drift on steps (clears when unlocked) |
+| **Right** | Chance for density drift on steps (clears when unlocked) |
 
-> When the knob is fully left or right the chance is 100%.
+> When the knob is fully left the chance to shift is 100%.
+
+> Density drift is inspired by the Chaos parameter. The key differences: Chaos always adds hits (fills), while Density drift can both add and remove hits. Chaos is always random (even when the loop is locked), while Density drift locks with Deja Vu. Chaos re-rolls once per loop cycle, while Density drift is applied per step.
 
 <br><br>
 
-## Y Shift Layer - Knobs
+## X Shift Layer - Knobs
 
 **Hold X Mode** and turn knobs to access hidden parameters.
+
+> All shift layer parameters have a neutral position at 12 o'clock, meaning they have no effect on the sound until you turn them.
 
 <img src="images/truchets_cheatsheet_2.png" style="width:500px;">
 
@@ -128,9 +157,9 @@ Change the pattern coordinates on the current bank.
 
 <br><br>
 
-## Y Shift Layer - Buttons
+## X Shift Layer - Buttons
 
-**Hold X Mode** and press buttons to access CV routing and settings.
+**Hold X Mode** and press buttons to access CV routing and bank select.
 
 <img src="images/truchets_cheatsheet_3.png" style="width:500px;">
 
@@ -213,12 +242,21 @@ Original Marbles 1.3 setting. When enabled, reset input resets the pattern to st
 
 > [1.3 manual](https://pichenettes.github.io/mutable-instruments-documentation/modules/marbles/firmware/#:~:text=Implicit%20and%20explicit,experience%20odd%20timing.)
 
-<br><br>
-
 #### Gate length control (t Bias & Jitter)
 While **Holding T Model** the gate configuration parameters are still accesible. 
 > [Marbles manual about gate configuration](https://arc.net/l/quote/heojrdjx)
 
+
+<br><br>
+
+## Patching ideas
+
+- Grids mode can still feel really random by turning Chaos fully clockwise or counter clockwise and having a high swing value.
+- Use a small amount of Jitter for a humanized feel.
+- Turning on Henri mode can give you a B side of a beat. Turning it on and off can give some nice breaks.
+- Self patching Marbles X side to any grid parameter can give great results. 
+- Having a high spread and steps on the X side can give random gate outputs driven by the Grids gate generation. Essentially creating 7 gate outputs.
+- Having a offset module patched to Map/Chaos cv in can give you direct control over these parameters without using the shift layer. Think of Stages, Shades or Blinds
 
 <br><br>
 
