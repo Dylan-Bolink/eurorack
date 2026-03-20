@@ -36,7 +36,7 @@ namespace marbles {
 using namespace std;
 using namespace stmlib;
 
-const float kDeadband = kDeadband;
+const float kDeadband = 0.06f;
 
 /* static */
 DividerPattern TGenerator::divider_patterns[kNumDividerPatterns] = {
@@ -550,9 +550,13 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
     // Velocity: 0.0 at threshold, 1.0 at 255
     float range = 255.0f - static_cast<float>(grids_accent_threshold_);
     if (range > 0.0f) {
-      accent_velocity_ = (static_cast<float>(accent_level) - static_cast<float>(grids_accent_threshold_)) / range;
-      if (accent_velocity_ < 0.0f) accent_velocity_ = 0.0f;
-      if (accent_velocity_ > 1.0f) accent_velocity_ = 1.0f;
+      float v = (static_cast<float>(accent_level) - static_cast<float>(grids_accent_threshold_)) / range;
+      if (v < 0.0f) v = 0.0f;
+      if (v > 1.0f) v = 1.0f;
+      // Expand low velocities at high thresholds where levels cluster near threshold
+      float t = static_cast<float>(grids_accent_threshold_) / 255.0f;
+      float v_sqrt = v > 0.0f ? sqrtf(v) : 0.0f;
+      accent_velocity_ = v * (1.0f - t) + v_sqrt * t;
     } else {
       accent_velocity_ = 1.0f;
     }

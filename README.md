@@ -1,6 +1,6 @@
 # Mutable Instruments - Marbles: Truchets
 
-A reimagining of Mutable Instruments [**_Grids_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/grids/) drum pattern generator, now living inside Marbles. Truchets is built on [**_Marbles 1.3_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/marbles/firmware/). All other modes still function the same as in the original firmware.
+A reimagining of Mutable Instruments [**_Grids_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/grids/) drum pattern generator, now living inside Marbles. Truchets is built on [**_Marbles 1.3_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/marbles/firmware/), it adds a new T-side mode while keeping all original Marbles functionality intact.
 
 <br>
 
@@ -27,7 +27,7 @@ A reimagining of Mutable Instruments [**_Grids_**](https://pichenettes.github.io
 7. [Patching Ideas](#patching-ideas)
 8. [Credits](#credits)
 
-<br><br>
+<br>
 
 ## Activating Grids Mode
 
@@ -45,7 +45,7 @@ Long press **T Mode** while on drum mode (solid red) to enter Grids mode (blinki
 | **Y** | Accent output |
 | **X1/X2/X3** | Random voltages |
 
-<br><br>
+<br>
 
 ## Standard Controls
 
@@ -81,7 +81,7 @@ The Deja Vu section controls pattern looping:
 
 > Density drift is inspired by the Chaos parameter. The key differences: Chaos always adds hits (fills), while Density drift can both add and remove hits. Chaos is always random (even when the loop is locked), while Density drift locks with Deja Vu. Chaos re-rolls once per loop cycle, while Density drift is applied per step.
 
-<br><br>
+<br>
 
 ## X Shift Layer - Knobs
 
@@ -151,11 +151,13 @@ Change the pattern coordinates on the current bank.
 
 | Position | Effect |
 |----------|--------|
-| **Left** | Random voltage window (0V-5V at far left, 4.9V-5V near noon) |
-| **Noon** | Neutral (5v gates) |
-| **Right** | Velocity-sensitive gates (voltage follows accent level) |
+| **Left** | Random voltage window |
+| **Noon** | Neutral (5V gates) |
+| **Right** | Velocity-sensitive gates (stronger accents = higher voltage) |
 
-<br><br>
+> Both sides start as fixed 5V gates near noon. Turning the knob further from center widens the voltage window, reaching the full 0V–5V range at the extremes.
+
+<br>
 
 ## X Shift Layer - Buttons
 
@@ -205,7 +207,7 @@ Hold **X Mode** + tap **T Model** to cycle through pattern banks:
 
 > When enabled, a **gate signal (+2.5V)** on the Deja Vu CV input flips the lock state.
 
-<br><br>
+<br>
 
 ## Advanced Settings Layer
 
@@ -217,8 +219,8 @@ Hold **X Mode** + tap **T Model** to cycle through pattern banks:
 |----------------------|---------|---------------|--------------|
 | **T Range** | Read mode | Normal | Henri |
 | **X Ext** | Accent hang | Normal gates | Hanging accents |
-| **T Déjà Vu** | Loop playhead | Shared playhead | Independent playhead |
-| **X Déjà Vu** | Loop start | Dynamic (from current step) | Always from beat 1 |
+| **T Deja Vu** | Loop playhead | Shared playhead | Independent playhead |
+| **X Deja Vu** | Loop start | Dynamic (from current step) | Always from beat 1 |
 | **X Mode** | Explicit reset | Off | On |
 
 ### Setting Descriptions
@@ -231,10 +233,10 @@ When **on** AND an accent variation is active, accents will sustain until the ne
 
 > This turns accent into a sample and hold output driven by accent and the current accent variation.
 
-#### Independent Loop Playhead (T Déjà Vu)
+#### Independent Loop Playhead (T Deja Vu)
 When **on**, the loop has its own playhead separate from the main pattern. When you unlock, playback stays in sync with where the pattern would have been.
 
-#### Loop from Beat 1 (X Déjà Vu)
+#### Loop from Beat 1 (X Deja Vu)
 When **on**, loops always start from step 1 of the pattern instead of the step where you activated the loop.
 
 #### Explicit Reset (X Mode)
@@ -247,7 +249,7 @@ While **Holding T Model** the gate configuration parameters are still accesible.
 > [Marbles manual about gate configuration](https://arc.net/l/quote/heojrdjx)
 
 
-<br><br>
+<br>
 
 ## Patching ideas
 
@@ -258,7 +260,7 @@ While **Holding T Model** the gate configuration parameters are still accesible.
 - Having a high spread and steps on the X side can give random gate outputs driven by the Grids gate generation. Essentially creating 7 gate outputs.
 - Having a offset module patched to Map/Chaos cv in can give you direct control over these parameters without using the shift layer. Think of Stages, Shades or Blinds
 
-<br><br>
+<br>
 
 ## Credits
 

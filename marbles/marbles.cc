@@ -587,7 +587,7 @@ void Process(IOBuffer::Block* block, size_t size) {
         } else if (variation > 136) {
           // Right side: dynamic velocity
           float knob_amount = static_cast<float>(variation - 137) / 118.0f;
-          float min_voltage = 5.0f - 3.0f * knob_amount;
+          float min_voltage = 5.0f - 5.0f * knob_amount;
           float velocity = t_generator.get_accent_velocity();
           held_accent_voltage = min_voltage + (5.0f - min_voltage) * velocity;
         } else {
