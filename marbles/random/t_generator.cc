@@ -32,9 +32,11 @@
 #include "marbles/resources.h"
 
 namespace marbles {
-  
+
 using namespace std;
 using namespace stmlib;
+
+const float kDeadband = 0.06f;
 
 /* static */
 DividerPattern TGenerator::divider_patterns[kNumDividerPatterns] = {
@@ -153,14 +155,35 @@ void TGenerator::Init(RandomStream* random_stream, float sr) {
   current_period_ = 0.0f;
 
   grids_swing_ = 0.0f;
+  grids_swing_latched_ = 0.0f;
+  grids_accent_threshold_ = 192; // Default OG grids value
+  grids_accent_mode_ = 3;  // All
+  grids_interpolation_ = true;  // Default smooth
+  accent_velocity_ = 1.0f;
+  random_accent_voltage_ = 1.0f;
+  for (int i = 0; i < 32; ++i) {
+    accent_voltage_buffer_[i] = random_stream->GetFloat();
+  }
   pending_hh_from_grids_ = false;
   pending_accent_from_grids_ = false;
+  accent_triggered_ = false;
+
+  grids_groove_offset_ = 0.0f;
+  groove_delay_countdown_ = 0;
+  groove_delay_for_t1_ = true;
+
+  grids_sync_playheads_ = false;
+  grids_loop_start_at_one_ = false;
+  grids_free_step_ = 0;
+  fill(grids_part_perturbation_, grids_part_perturbation_ + 3, 0);
 
   grids_loop_start_ = 0;
   prev_deja_vu_active_ = false;
-  fill(&grids_step_replacement_[0], &grids_step_replacement_[32], 0xFF);
-  drift_order_head_ = 0;
-  drift_order_count_ = 0;
+  for (size_t inst = 0; inst < 3; ++inst) {
+    fill(&grids_step_replacement_[inst][0], &grids_step_replacement_[inst][32], 0xFF);
+    drift_order_head_[inst] = 0;
+  }
+  chaos_rng_state_ = 1;
 
   sample_index_ = 0;
   fill(&hh_gate_buffer_[0], &hh_gate_buffer_[kBlockSize], false);
@@ -267,10 +290,12 @@ void TGenerator::ScheduleOutputPulses(const RandomVector& x, int bitmask) {
 
 int TGenerator::GenerateGrids(const RandomVector& x) {
   ++drum_pattern_step_;
+  ++grids_free_step_;
+  if (grids_free_step_ >= 32) grids_free_step_ = 0;
   size_t len = static_cast<size_t>(grids_length_);
   if (len < 1) len = 32;
 
-  const float kDead = 0.03f;
+  const float kDead = 0.02f;
   bool kick_trig = false;
   bool snare_trig = false;
   bool hh_trig = false;
@@ -305,120 +330,251 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
       float shift_probability = 1.0f - deja_vu_amount / 0.47f;
       if (x.variables.u[0] < shift_probability) {
         grids_loop_start_ = (grids_loop_start_ + 1) % 32;
+        drum_pattern_step_ = grids_loop_start_;
       }
     }
   } else {
     if (drum_pattern_step_ >= 32) drum_pattern_step_ = 0;
   }
 
+  // Latch swing every 4 steps to smooth out knob changes
+  if ((drum_pattern_step_ % 4) == 0) {
+    grids_swing_latched_ = grids_swing_;
+  }
+
   uint8_t read_step = drum_pattern_step_ % 32;
-  uint8_t x_u8 = static_cast<uint8_t>(grids_x_ * 255.0f);
-  uint8_t y_u8 = static_cast<uint8_t>(grids_y_ * 255.0f);
+  uint8_t x_u8, y_u8;
 
-  // idea for later? alternate coordinate quantization based on setting
-  // if (range_ == T_GENERATOR_RANGE_4X) { // RED (MF Linear)
-  //     uint8_t p_idx = static_cast<uint8_t>(grids_x_ * 24.9f);
-  //     x_u8 = (p_idx % 5) * 64; y_u8 = (p_idx / 5) * 64;
-  //     read_step = (read_step + static_cast<uint8_t>(grids_y_ * 15.0f)) % 32;
-  // } else if (range_ == T_GENERATOR_RANGE_1X) { // ORANGE (Discrete)
-  //     x_u8 = static_cast<uint8_t>(grids_x_ * 4.9f) * 64;
-  //     y_u8 = static_cast<uint8_t>(grids_y_ * 4.9f) * 64;
-  // } else { // GREEN (Smooth)
-      // x_u8 = static_cast<uint8_t>(grids_x_ * 255.0f);
-      // y_u8 = static_cast<uint8_t>(grids_y_ * 255.0f);
-  // }
+  if (grids_interpolation_) {
+    // Smooth interpolation
+    x_u8 = static_cast<uint8_t>(grids_x_ * 255.0f);
+    y_u8 = static_cast<uint8_t>(grids_y_ * 255.0f);
+  } else {
+    // Discrete 5x5 grid quantization (values: 0, 64, 128, 192, 255)
+    uint8_t x_idx = static_cast<uint8_t>(grids_x_ * 4.99f);
+    uint8_t y_idx = static_cast<uint8_t>(grids_y_ * 4.99f);
+    if (x_idx > 4) x_idx = 4;
+    if (y_idx > 4) y_idx = 4;
+    x_u8 = x_idx < 4 ? x_idx * 64 : 255;
+    y_u8 = y_idx < 4 ? y_idx * 64 : 255;
+  }
 
-  grids::PatternGenerator::OutputStep result = grids_.GetStep(read_step, x_u8, y_u8);
+  // Parse groove offset into step offset or micro-timing
+  int kick_step_offset = 0, snare_step_offset = 0;
+  float kick_micro = 0.0f, snare_micro = 0.0f;
+  if (grids_groove_offset_ < -kDeadband) {
+    float amt = -grids_groove_offset_;
+    if (amt >= 0.87f) kick_step_offset = 3;
+    else if (amt >= 0.73f) kick_step_offset = 2;
+    else if (amt >= 0.60f) kick_step_offset = 1;
+    else kick_micro = (amt - kDeadband) / 0.54f * 0.5f;
+  } else if (grids_groove_offset_ > kDeadband) {
+    float amt = grids_groove_offset_;
+    if (amt >= 0.87f) snare_step_offset = 3;
+    else if (amt >= 0.73f) snare_step_offset = 2;
+    else if (amt >= 0.60f) snare_step_offset = 1;
+    else snare_micro = (amt - kDeadband) / 0.54f * 0.5f;
+  }
 
-  uint8_t chaos_amt = static_cast<uint8_t>(grids_chaos_ * 64.0f);
-  
-  uint8_t p[3];
-  p[0] = static_cast<uint8_t>(x.variables.u[0] * chaos_amt);
-  p[1] = static_cast<uint8_t>(x.variables.u[1] * chaos_amt);
-  p[2] = static_cast<uint8_t>((x.variables.u[0] + x.variables.u[1]) * 0.5f * chaos_amt);
+  uint8_t kick_read = (read_step - kick_step_offset + 32) % 32;
+  uint8_t snare_read = (read_step - snare_step_offset + 32) % 32;
 
-
+  // Recalculate perturbation once per cycle: on loop wrap (locked) or step 0 (free)
+  bool cycle_start = prev_deja_vu_active_ ? loop_wrapped : (read_step == 0);
+  if (cycle_start) {
+    uint8_t chaos_amt = (grids_chaos_ > 0.0f)
+        ? static_cast<uint8_t>(grids_chaos_ * 64.0f)
+        : 0;
+    chaos_rng_state_ = chaos_rng_state_ * 1664525u + 1013904223u;
+    grids_part_perturbation_[0] = ((chaos_rng_state_ >> 0) & 0xFF) * chaos_amt >> 8;
+    grids_part_perturbation_[1] = ((chaos_rng_state_ >> 8) & 0xFF) * chaos_amt >> 8;
+    grids_part_perturbation_[2] = ((chaos_rng_state_ >> 16) & 0xFF) * chaos_amt >> 8;
+  }
+  uint8_t* p = grids_part_perturbation_;
 
   // Right density drifting
-  uint8_t step_idx = drum_pattern_step_ % 32;
-  int8_t density_drift = 0;
+  int8_t density_drift[3] = {0, 0, 0};
 
   if (prev_deja_vu_active_ && len < 32) {
     float deja_vu_amount = sequence_.deja_vu();
 
     if (deja_vu_amount > 0.53f) {
-      float drift_probability = ((deja_vu_amount - 0.53f) / 0.47f) * 0.50f;
+      float drift_rate = (deja_vu_amount - 0.53f) / 0.47f;
+      float drift_probability = drift_rate * drift_rate * 0.50f;
 
-      if (x.variables.u[0] < drift_probability) {
-        size_t max_drifts = len / 2;
-        if (max_drifts < 1) max_drifts = 1;
+      size_t max_drifts = len / 2;
+      if (max_drifts < 1) max_drifts = 1;
 
-        size_t drift_count = 0;
-        for (size_t i = 0; i < 32; ++i) {
-          if (grids_step_replacement_[i] != 0xFF) drift_count++;
-        }
+      // Derive 3 random values from u[0] and u[1]
+      float drift_rand[3] = {
+        x.variables.u[0],
+        x.variables.u[1],
+        x.variables.u[0] + x.variables.u[1]
+      };
+      if (drift_rand[2] >= 1.0f) drift_rand[2] -= 1.0f;
 
-        // If at max, remove one using round-robin
-        if (drift_count >= max_drifts) {
-          for (size_t j = 0; j < 32; ++j) {
-            size_t idx = (drift_order_head_ + j) % 32;
-            if (grids_step_replacement_[idx] != 0xFF && idx != step_idx) {
-              grids_step_replacement_[idx] = 0xFF;
-              drift_order_head_ = (idx + 1) % 32;
-              break;
+      for (size_t inst = 0; inst < 3; ++inst) {
+        if (drift_rand[inst] < drift_probability) {
+          size_t drift_count = 0;
+          for (size_t i = 0; i < 32; ++i) {
+            if (grids_step_replacement_[inst][i] != 0xFF) drift_count++;
+          }
+
+          // If at max, remove one using round-robin
+          if (drift_count >= max_drifts) {
+            for (size_t j = 0; j < 32; ++j) {
+              size_t idx = (drift_order_head_[inst] + j) % 32;
+              if (grids_step_replacement_[inst][idx] != 0xFF && idx != read_step) {
+                grids_step_replacement_[inst][idx] = 0xFF;
+                drift_order_head_[inst] = (idx + 1) % 32;
+                break;
+              }
             }
           }
-        }
 
-        // Set drift range: ±126 (~50% of threshold range)
-        int8_t drift = static_cast<int8_t>((x.variables.u[1] - 0.5f) * 252.0f);
-        grids_step_replacement_[step_idx] = static_cast<uint8_t>(128 + drift);
+          // Set drift range: ±126 (~50% of threshold range)
+          int8_t drift = static_cast<int8_t>((drift_rand[inst] - 0.5f) * 252.0f);
+          grids_step_replacement_[inst][read_step] = static_cast<uint8_t>(128 + drift);
+        }
       }
     }
 
-    // Apply stored drift
-    if (grids_step_replacement_[step_idx] != 0xFF) {
-      density_drift = static_cast<int8_t>(grids_step_replacement_[step_idx]) - 128;
+    // Apply stored drifts
+    for (size_t inst = 0; inst < 3; ++inst) {
+      if (grids_step_replacement_[inst][read_step] != 0xFF) {
+        density_drift[inst] = static_cast<int8_t>(grids_step_replacement_[inst][read_step]) - 128;
+      }
     }
   }
 
+  uint8_t kick_lvl = 0, snare_lvl = 0, hh_lvl = 0;
+
   if (dens_kick_ > kDead) {
-    uint8_t lvl = result.bd;
-    if (lvl < (255 - p[0])) lvl += p[0]; else lvl = 255;
-    int thresh_i = static_cast<int>((1.0f - dens_kick_) * 255.0f) + density_drift;
+    kick_lvl = grids_.ReadDrumMap(kick_read, 0, x_u8, y_u8);
+    if (kick_lvl < (255 - p[0])) kick_lvl += p[0]; else kick_lvl = 255;
+    int thresh_i = static_cast<int>((1.0f - dens_kick_) * 255.0f) + density_drift[0];
     if (thresh_i < 0) thresh_i = 0;
     if (thresh_i > 255) thresh_i = 255;
-    kick_trig = (lvl > thresh_i);
-    kick_accent = kick_trig && (lvl > 192);
+    kick_trig = (kick_lvl > thresh_i);
+    kick_accent = kick_trig && (kick_lvl > grids_accent_threshold_);
   }
 
   if (dens_snare_ > kDead) {
-    uint8_t lvl = result.sd;
-    if (lvl < (255 - p[1])) lvl += p[1]; else lvl = 255;
-    int thresh_i = static_cast<int>((1.0f - dens_snare_) * 255.0f) + density_drift;
+    snare_lvl = grids_.ReadDrumMap(snare_read, 1, x_u8, y_u8);
+    if (snare_lvl < (255 - p[1])) snare_lvl += p[1]; else snare_lvl = 255;
+    int thresh_i = static_cast<int>((1.0f - dens_snare_) * 255.0f) + density_drift[1];
     if (thresh_i < 0) thresh_i = 0;
     if (thresh_i > 255) thresh_i = 255;
-    snare_trig = (lvl > thresh_i);
-    snare_accent = snare_trig && (lvl > 192);
+    snare_trig = (snare_lvl > thresh_i);
+    snare_accent = snare_trig && (snare_lvl > grids_accent_threshold_);
   }
 
   if (dens_hh_ > kDead) {
-    uint8_t lvl = result.hh;
-    if (lvl < (255 - p[2])) lvl += p[2]; else lvl = 255;
-    int thresh_i = static_cast<int>((1.0f - dens_hh_) * 255.0f) + density_drift;
+    hh_lvl = grids_.ReadDrumMap(read_step, 2, x_u8, y_u8);
+    if (hh_lvl < (255 - p[2])) hh_lvl += p[2]; else hh_lvl = 255;
+    int thresh_i = static_cast<int>((1.0f - dens_hh_) * 255.0f) + density_drift[2];
     if (thresh_i < 0) thresh_i = 0;
     if (thresh_i > 255) thresh_i = 255;
-    hh_trig = (lvl > thresh_i);
-    hh_accent = hh_trig && (lvl > 192);
+    hh_trig = (hh_lvl > thresh_i);
+    hh_accent = hh_trig && (hh_lvl > grids_accent_threshold_);
+  }
+
+  // mirrors Process() logic for capped swing + microtiming
+  float swing_fraction = 0.0f;
+  if (grids_swing_latched_ != 0.0f) {
+    float swing_amount = fabsf(grids_swing_latched_);
+    bool step_is_swung;
+    if (grids_swing_latched_ < 0.0f) {
+      step_is_swung = (drum_pattern_step_ & 2);  // classic swing
+    } else {
+      {  // tresillo 3-3-2 swing
+        static const uint8_t kTresillo = 0xA4;  // bits 2,5,7
+        step_is_swung = (kTresillo >> ((drum_pattern_step_ >> 1) & 7)) & 1;
+      }
+    }
+    if (step_is_swung) {
+      swing_fraction = swing_amount * 0.5f;
+    }
+  }
+
+  // Cap micro-timing so swing + micro <= 75% of step period
+  const float kMaxCombined = 0.75f;
+  float micro_headroom = kMaxCombined - swing_fraction;
+  if (micro_headroom < 0.0f) micro_headroom = 0.0f;
+
+  // Micro-timing suppress: delay the trigger by a fraction of the period
+  bool kick_suppress = false, snare_suppress = false;
+  if (kick_micro > 0.0f && kick_trig && current_period_ > 0.0f) {
+    float capped = kick_micro < micro_headroom ? kick_micro : micro_headroom;
+    kick_suppress = true;
+    groove_delay_for_t1_ = true;
+    groove_delay_countdown_ = static_cast<int>(capped * current_period_);
+    if (groove_delay_countdown_ < 1) groove_delay_countdown_ = 1;
+  }
+  if (snare_micro > 0.0f && snare_trig && current_period_ > 0.0f) {
+    float capped = snare_micro < micro_headroom ? snare_micro : micro_headroom;
+    snare_suppress = true;
+    groove_delay_for_t1_ = false;
+    groove_delay_countdown_ = static_cast<int>(capped * current_period_);
+    if (groove_delay_countdown_ < 1) groove_delay_countdown_ = 1;
   }
 
   int bitmask = 0;
-  if (kick_trig) bitmask |= 1;
-  if (snare_trig) bitmask |= 2;
-  bool combined_accent = kick_accent || snare_accent || hh_accent;
+  if (kick_trig && !kick_suppress) bitmask |= 1;
+  if (snare_trig && !snare_suppress) bitmask |= 2;
+
+  // Accent mode: 0=kick only, 1=hh only, 2=snare only, 3=all
+  bool combined_accent;
+  switch (grids_accent_mode_) {
+    case 0: combined_accent = kick_accent; break;
+    case 1: combined_accent = hh_accent; break;
+    case 2: combined_accent = snare_accent; break;
+    default: combined_accent = kick_accent || snare_accent || hh_accent; break;
+  }
+
+  // Calculate velocity for dynamic accent mode
+  if (combined_accent) {
+    uint8_t accent_level = 0;
+    switch (grids_accent_mode_) {
+      case 0: accent_level = kick_lvl; break;
+      case 1: accent_level = hh_lvl; break;
+      case 2: accent_level = snare_lvl; break;
+      default: {
+        // All mode: use highest accenting level
+        if (kick_accent && kick_lvl > accent_level) accent_level = kick_lvl;
+        if (snare_accent && snare_lvl > accent_level) accent_level = snare_lvl;
+        if (hh_accent && hh_lvl > accent_level) accent_level = hh_lvl;
+        break;
+      }
+    }
+    // Velocity: 0.0 at threshold, 1.0 at 255
+    float range = 255.0f - static_cast<float>(grids_accent_threshold_);
+    if (range > 0.0f) {
+      float v = (static_cast<float>(accent_level) - static_cast<float>(grids_accent_threshold_)) / range;
+      if (v < 0.0f) v = 0.0f;
+      if (v > 1.0f) v = 1.0f;
+      // Expand low velocities at high thresholds where levels cluster near threshold
+      float t = static_cast<float>(grids_accent_threshold_) / 255.0f;
+      float v_sqrt = v > 0.0f ? sqrtf(v) : 0.0f;
+      accent_velocity_ = v * (1.0f - t) + v_sqrt * t;
+    } else {
+      accent_velocity_ = 1.0f;
+    }
+    
+    //If locked read from buffer, else store in buffer and read new random value
+    if (prev_deja_vu_active_) {
+      random_accent_voltage_ = accent_voltage_buffer_[read_step];
+    } else {
+      random_accent_voltage_ = x.variables.u[1];
+      accent_voltage_buffer_[read_step] = random_accent_voltage_;
+    }
+  }
 
   pending_hh_from_grids_ = hh_trig;
   pending_accent_from_grids_ = combined_accent;
+  if (combined_accent) {
+    accent_triggered_ = true;
+  }
 
   return bitmask;
 }
@@ -484,8 +640,13 @@ void TGenerator::Process(bool use_external_clock, bool* reset, const GateFlags* 
       hh_slave_ramp_.Reset();
       accent_slave_ramp_.Reset(); 
       sequence_.Reset();
-      drum_pattern_step_ = 0;
+      drum_pattern_step_ = 33;
       grids_loop_start_ = 0;
+
+      // Experimental reset addition: clear out any stored step replacements on reset to avoid stuck steps
+      master_phase_ = 0.0f;
+      jitter_multiplier_ = 1.0f;
+      previous_external_ramp_value_ = *ramps.external;
 
       if (model_ != T_GENERATOR_MODEL_DIVIDER) {
           RandomVector rv;
@@ -497,7 +658,7 @@ void TGenerator::Process(bool use_external_clock, bool* reset, const GateFlags* 
   while (size--) {
     float frequency = use_external_clock ? *ramps.external - previous_external_ramp_value_ : internal_frequency;
     frequency += frequency < 0.0f ? 1.0f : 0.0f;
-    float j_mult = (model_ == T_GENERATOR_MODEL_GRIDS) ? 1.0f : jitter_multiplier_;
+    float j_mult = (model_ == T_GENERATOR_MODEL_GRIDS && grids_chaos_ > -kDeadband) ? 1.0f : jitter_multiplier_;
     float jittery_freq = frequency * j_mult;
     master_phase_ += jittery_freq;
 
@@ -508,21 +669,37 @@ void TGenerator::Process(bool use_external_clock, bool* reset, const GateFlags* 
     if (master_phase_ > 1.0f) {
       // Calculate swing threshold
       float swing_threshold = 1.0f;
-      if (model_ == T_GENERATOR_MODEL_GRIDS && grids_swing_ > 0.0f) {
+      if (model_ == T_GENERATOR_MODEL_GRIDS && grids_swing_latched_ != 0.0f) {
           size_t next_step = (drum_pattern_step_ + 1) % 32;
-          bool next_is_swung = (next_step & 2);
+          float swing_amount = fabsf(grids_swing_latched_);
+          bool next_is_swung;
+          if (grids_swing_latched_ < 0.0f) {
+              // Left: classic swing
+              next_is_swung = (next_step & 2);
+          } else {
+              {  // Right: tresillo 3-3-2 swing
+                static const uint8_t kTresillo = 0xA4;  // bits 2,5,7
+                next_is_swung = (kTresillo >> ((next_step >> 1) & 7)) & 1;
+              }
+          }
           if (next_is_swung) {
-              // Delay up to 50% of step duration
-              swing_threshold = 1.0f + (grids_swing_ * 0.5f);
+            // Delay up to 50% of step duration
+              swing_threshold = 1.0f + (swing_amount * 0.5f);
           }
       }
-      
+
       if (master_phase_ >= swing_threshold) {
         master_phase_ -= 1.0f;  // Subtract threshold, not 1.0
         RandomVector rv;
         sequence_.NextVector(rv.x, sizeof(rv.x) / sizeof(float));
-        
-        float jitter_amount = jitter_ * jitter_ * jitter_ * jitter_ * 36.0f;
+
+        float jitter_amount;
+        if (model_ == T_GENERATOR_MODEL_GRIDS && grids_chaos_ < -kDeadband) {
+            float slop = fabsf(grids_chaos_);
+            jitter_amount = slop * slop * slop * slop * 18.0f;
+        } else {
+            jitter_amount = jitter_ * jitter_ * jitter_ * jitter_ * 36.0f;
+        }
         float x = FastBetaDistributionSample(rv.variables.jitter);
         float mult = SemitonesToRatio((x * 2.0f - 1.0f) * jitter_amount);
         mult *= (phase_difference_ > 0.0f) ? (1.0f + phase_difference_) : (1.0f / (1.0f - phase_difference_));
@@ -551,12 +728,22 @@ void TGenerator::Process(bool use_external_clock, bool* reset, const GateFlags* 
       float hh_ramp_value;
       hh_slave_ramp_.Process(jittery_freq, &hh_ramp_value, &hh_gate);
       hh_gate_buffer_[sample_index_] = hh_gate;
-      
+
       bool accent_gate;
       float accent_ramp_value;
       accent_slave_ramp_.Process(jittery_freq, &accent_ramp_value, &accent_gate);
       accent_gate_buffer_[sample_index_] = accent_gate;
-      
+
+      // Groove delay: retrigger slave ramp after countdown expires
+      if (groove_delay_countdown_ > 0) {
+        --groove_delay_countdown_;
+        if (groove_delay_countdown_ == 0) {
+          float pw = 0.05f + 0.9f * pulse_width_mean_;
+          size_t idx = groove_delay_for_t1_ ? 0 : 1;
+          slave_ramp_[idx].Init(true, pw, 0.5f);
+        }
+      }
+
       if (!hh_gate) {
         *(ramps.master - 1) = 0.0f;
       }

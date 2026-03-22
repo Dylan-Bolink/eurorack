@@ -85,19 +85,29 @@ struct State {
   uint8_t grids_y;
   uint8_t grids_chaos;
   uint8_t t_rate_stored;
+  uint8_t grids_hh_density;
 
   uint8_t grids_x_cv_swap;
   uint8_t grids_y_cv_swap;
   uint8_t grids_chaos_cv_swap;
   uint8_t grids_swing;
+  uint8_t grids_accent_threshold;
+  uint8_t grids_accent_variation;
+  uint8_t grids_groove_offset;
 
   uint8_t deja_vu_t_cv_swap;
   uint8_t deja_vu_x_cv_swap;
 
   uint8_t color_blind;
   uint8_t explicit_reset;
-  
-  uint8_t padding[0];
+  uint8_t grids_interpolation;
+  uint8_t grids_bank;
+  uint8_t grids_henri;
+  uint8_t grids_accent_hang;
+  uint8_t grids_sync_playheads;
+  uint8_t grids_loop_start_at_one;
+
+  uint8_t padding[11];  // Reserve space for future fields (48 bytes total)
 
   enum { tag = 0x54415453 };
 };
@@ -157,6 +167,10 @@ class Settings {
   
   inline bool explicit_reset() const {
     return state_.explicit_reset;
+  }
+
+  inline bool grids_interpolation() const {
+    return state_.grids_interpolation;
   }
 
   inline uint8_t grids_x_cv_swap() const {

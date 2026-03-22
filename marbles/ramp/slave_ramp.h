@@ -76,7 +76,7 @@ class SlaveRamp {
       float expected_value) {
     bernoulli_ = true;
 
-    if (must_complete_) {
+    if (must_complete) {
       phase_ = 0.0f;
       pulse_width_ = pulse_width;
       ratio_ = 1.0f;
@@ -114,7 +114,7 @@ class SlaveRamp {
     *phase = output_phase;
     *gate = pulse_width_ == 0.0f
         ? pulse_length_ < 32 && output_phase <= 0.5f
-        : output_phase < pulse_width_;
+        : (bernoulli_ ? phase_ : output_phase) < pulse_width_;
     ++pulse_length_;
   }
 

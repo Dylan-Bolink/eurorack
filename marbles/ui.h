@@ -136,6 +136,7 @@ class Ui {
   float pot_value_[ADC_CHANNEL_LAST];
   
   bool setting_modification_flag_;
+  bool grids_save_flag_;
   bool deja_vu_lock_;
   
   bool output_test_mode_;

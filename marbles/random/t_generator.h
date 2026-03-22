@@ -163,27 +163,83 @@ class TGenerator {
 
   bool get_hh_gate(size_t i) const { return hh_gate_buffer_[i]; }
   bool get_accent_gate(size_t i) const { return accent_gate_buffer_[i]; }
+  float get_accent_velocity() const { return accent_velocity_; }
+  float get_random_accent_voltage() const { return random_accent_voltage_; }
+  float get_pulse_width_mean() const { return pulse_width_mean_; }
+
+  bool get_and_clear_accent_triggered() {
+    bool result = accent_triggered_;
+    accent_triggered_ = false;
+    return result;
+  }
 
   void set_grids_swing(float swing) {
     grids_swing_ = swing;
   }
 
+  void set_grids_accent_threshold(uint8_t threshold) {
+    grids_accent_threshold_ = threshold;
+  }
+
+  // 0=kick 1=hh 2=snare 3=all
+  void set_grids_accent_mode(uint8_t mode) {
+    grids_accent_mode_ = mode;
+  }
+
+  void set_grids_interpolation(bool interpolation) {
+    grids_interpolation_ = interpolation;
+  }
+
+  void set_grids_bank(uint8_t bank) {
+    grids_.SetBank(bank);
+  }
+
+  void set_grids_groove_offset(float offset) {
+    grids_groove_offset_ = offset;
+  }
+
+  void set_grids_henri(bool henri) {
+    grids_.SetHenri(henri);
+  }
+
+  void set_grids_sync_playheads(bool sync) {
+    grids_sync_playheads_ = sync;
+  }
+
+  void set_grids_loop_start_at_one(bool at_one) {
+    grids_loop_start_at_one_ = at_one;
+  }
+
   void set_grids_deja_vu_active(bool active, bool reset_active = false) {
+    // On lock activation
     if (active && !prev_deja_vu_active_) {
       size_t len = static_cast<size_t>(grids_length_);
-      grids_loop_start_ = (drum_pattern_step_ + 33 - len) % 32;
-
-      // If explicit reset, start at beginning
-      if(reset_active) {
-        grids_loop_start_ = 0;
-      }
+      grids_loop_start_ = grids_loop_start_at_one_
+          ? 0
+          : (drum_pattern_step_ + 33 - len) % 32;
 
       // Clear step drifts on new lock
-      for (size_t i = 0; i < 32; ++i) {
-        grids_step_replacement_[i] = 0xFF;
+      for (size_t inst = 0; inst < 3; ++inst) {
+        for (size_t i = 0; i < 32; ++i) {
+          grids_step_replacement_[inst][i] = 0xFF;
+        }
+        drift_order_head_[inst] = 0;
       }
-      drift_order_head_ = 0;
-      drift_order_count_ = 0;
+    }
+
+    // On unlock: sync playhead if enabled
+    if (!active && prev_deja_vu_active_ && grids_sync_playheads_) {
+      drum_pattern_step_ = grids_free_step_;
+    }
+
+    // Explicit reset: jump to loop start (or 0 if no loop)
+    if (reset_active) {
+      if (active) {
+        drum_pattern_step_ = (grids_loop_start_ + 31) % 32;
+      } else {
+        drum_pattern_step_ = 31;
+        grids_free_step_ = 31;
+      }
     }
 
     prev_deja_vu_active_ = active;
@@ -226,7 +282,7 @@ class TGenerator {
   }
   
   float one_hertz_;
-  
+
   TGeneratorModel model_;
   TGeneratorRange range_;
   
@@ -255,19 +311,36 @@ class TGenerator {
   size_t sample_index_;
 
   float grids_swing_;
+  float grids_swing_latched_;
+  uint8_t grids_accent_threshold_;
+  uint8_t grids_accent_mode_;  // 0=kick, 1=hh, 2=snare, 3=all
+  bool grids_interpolation_;
+  float accent_velocity_;
+  float random_accent_voltage_;
+  float accent_voltage_buffer_[32];
   bool pending_hh_from_grids_;
   bool pending_accent_from_grids_;
+  bool accent_triggered_;
+
+  // Groove offset: -1 to +1, negative = kick delayed, positive = snare delayed
+  float grids_groove_offset_;
+  int groove_delay_countdown_;
+  bool groove_delay_for_t1_;  // true = kick (T1/slave_ramp_[0]), false = snare (T3/slave_ramp_[1])
 
   SlaveRamp hh_slave_ramp_;
   SlaveRamp accent_slave_ramp_;
 
+  bool grids_sync_playheads_;
+  uint8_t grids_loop_start_at_one_;
+  uint8_t grids_free_step_;  // shadow counter for sync playheads
+  uint8_t grids_part_perturbation_[3];  // per-instrument chaos, set at step 0
+
   size_t grids_loop_start_;
   bool prev_deja_vu_active_;
-  uint8_t grids_step_replacement_[32];
+  uint8_t grids_step_replacement_[3][32];
 
-  uint8_t drift_order_[8];
-  size_t drift_order_head_;
-  size_t drift_order_count_;
+  size_t drift_order_head_[3];
+  uint32_t chaos_rng_state_;
 
   bool use_external_clock_;
 
