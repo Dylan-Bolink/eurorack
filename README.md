@@ -4,6 +4,11 @@ A reimagining of Mutable Instruments [**_Grids_**](https://pichenettes.github.io
 
 <br>
 
+For the latest update file go to the [**release page**](https://github.com/Dylan-Bolink/eurorack/releases).<br>
+When you need instructions on how to update your marbles go to the [**original manual**](https://arc.net/l/quote/yqufnyhb).
+
+<br>
+
 ## Contents
 
 1. [Activating Grids Mode](#activating-grids-mode)
@@ -11,7 +16,7 @@ A reimagining of Mutable Instruments [**_Grids_**](https://pichenettes.github.io
 3. [Standard Controls](#standard-controls)
    - [Density Knobs](#density-knobs)
    - [Deja Vu (T Side)](#deja-vu-t-side)
-4. [X Shift Layer - Knobs](#y-shift-layer---knobs)
+4. [X Shift Layer - Knobs](#x-shift-layer---knobs)
    - [Groove Offset](#groove-offset-x-bias)
    - [Rate](#rate-rate)
    - [Swing](#swing-jitter)
@@ -19,7 +24,7 @@ A reimagining of Mutable Instruments [**_Grids_**](https://pichenettes.github.io
    - [Chaos](#chaos-spread)
    - [Accent Control](#accent-control-deja-vu)
    - [Accent Variation](#accent-variation-length)
-5. [X Shift Layer - Buttons](#y-shift-layer---buttons)
+5. [X Shift Layer - Buttons](#x-shift-layer---buttons)
    - [Pattern Banks](#pattern-banks)
    - [CV Swap Routing](#cv-swap-routing)
    - [Deja Vu CV Swap](#deja-vu-cv-swap)
@@ -44,6 +49,8 @@ Long press **T Mode** while on drum mode (solid red) to enter Grids mode (blinki
 | **T3** | Snare trigger |
 | **Y** | Accent output |
 | **X1/X2/X3** | Random voltages |
+
+> X1/X2/X3 are following the standard Marbles behaviour. All X controls still function like the original firmware. X2 follows hihat pattern instead of master tempo source.
 
 <br>
 
@@ -87,7 +94,7 @@ The Deja Vu section controls pattern looping:
 
 **Hold X Mode** and turn knobs to access hidden parameters.
 
-> All shift layer parameters have a neutral position at 12 o'clock, meaning they have no effect on the sound until you turn them.
+> All shift layer parameters have a neutral position at noon (12 o'clock), meaning they have no effect on the sound until you turn them.
 
 <img src="images/truchets_cheatsheet_2.png" style="width:500px;">
 
@@ -156,6 +163,8 @@ Change the pattern coordinates on the current bank.
 | **Right** | Velocity-sensitive gates (stronger accents = higher voltage) |
 
 > Both sides start as fixed 5V gates near noon. Turning the knob further from center widens the voltage window, reaching the full 0V–5V range at the extremes.
+
+> The random voltages are locked with the Deja vu function.
 
 <br>
 
@@ -245,7 +254,7 @@ Original Marbles 1.3 setting. When enabled, reset input resets the pattern to st
 > [1.3 manual](https://pichenettes.github.io/mutable-instruments-documentation/modules/marbles/firmware/#:~:text=Implicit%20and%20explicit,experience%20odd%20timing.)
 
 #### Gate length control (t Bias & Jitter)
-While **Holding T Model** the gate configuration parameters are still accesible. 
+While **Holding T Model** the gate configuration parameters are still accessible. 
 > [Marbles manual about gate configuration](https://arc.net/l/quote/heojrdjx)
 
 
