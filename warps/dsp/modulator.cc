@@ -1300,11 +1300,12 @@ void Modulator::ProcessCrushMixer(ShortFrame* input, ShortFrame* output, size_t 
   float* in_2 = buffer_[1];
   float* aux = buffer_[2];
 
-  // if (!parameters_.carrier_shape) {
-  //   fill(&aux[0], &aux[size], 0.0f);
-  // }
+  // carrier_shape selects harmonic distortion character
+  // 0=off(odd), 1=green(even/tube), 2=yellow(hard clip), 3=red(digital)
+  int harmonic_mode = parameters_.carrier_shape;
+
   short* input_samples = &input->l;
-  for (int32_t i = parameters_.carrier_shape ? 1 : 0; i < 2; ++i) {
+  for (int32_t i = 0; i < 2; ++i) {
       amplifier_[i].Process(
           parameters_.channel_drive[i],
           1.0f,
@@ -1314,23 +1315,7 @@ void Modulator::ProcessCrushMixer(ShortFrame* input, ShortFrame* output, size_t 
           2,
           size);
   }
-  if (parameters_.carrier_shape) {
-    for (size_t i = 0; i < size; ++i) {
-      internal_modulation_[i] = static_cast<float>(input[i].l) / 32768.0f; 
-    }
-    OscillatorShape xmod_shape = static_cast<OscillatorShape>(
-        parameters_.carrier_shape - 1);
-    xmod_oscillator_.Render(
-          xmod_shape,
-          parameters_.note,
-          internal_modulation_,
-          in_1,
-          size);
-    for (size_t i = 0; i < size; ++i) {
-      in_1[i] = in_1[i] * kXmodCarrierGain;
-    }
-  }
-  
+
   ParameterInterpolator effect_interpolator(
       &previous_parameters_.raw_algorithm,
       parameters_.raw_algorithm,
@@ -1379,89 +1364,96 @@ void Modulator::ProcessCrushMixer(ShortFrame* input, ShortFrame* output, size_t 
       float aliased_A = Xmod<ALGORITHM_SIMPLE_BITCRUSHER>(mix_A, 0.0f, 0.0f, effect_amount);
       float aliased_B = Xmod<ALGORITHM_SIMPLE_BITCRUSHER>(mix_B, 0.0f, 1.0f, effect_amount);
 
-      // "JFET" Saturation
+      // Saturation (harmonic mode dependent)
       float drive = 1.0f + effect_amount * 2.0f;
-      processed_A = stmlib::SoftLimit(aliased_A * drive);
-      processed_B = stmlib::SoftLimit(aliased_B * drive);
-    } else {
-      // --- CW: Fizzly Chebyshev + Stereo Noise-Modulated Filter ---
-      const float stage_switch_threshold = 0.3f;
-      float stage_processed_A = 0.0f;
-      float stage_processed_B = 0.0f;
-
-      if (effect_amount < stage_switch_threshold) {
-        // --- Stage 1: Colouring (Input Drive + Subtle LPF) ---
-
-        // Scale effect_amount from [0.0, 0.3] up to [0.0, 1.0] for control
-        float stage1_amount = effect_amount / stage_switch_threshold;
-        // Apply curve for smoother start
-        float stage1_curved = stage1_amount * stage1_amount;
-
-        // Apply Input Drive (gentle increase in this stage)
-        float input_drive = 1.0f + stage1_curved * 1.0f;
-        float driven_mix_A = mix_A * input_drive;
-        float driven_mix_B = mix_B * input_drive;
-
-        // Apply a very gentle fixed LPF to smooth the drive
-        filter_[0].set_f<stmlib::FREQUENCY_FAST>(0.45f); // Keep it fairly open
-        filter_[1].set_f<stmlib::FREQUENCY_FAST>(0.45f);
-        stage_processed_A = filter_[0].Process<stmlib::FILTER_MODE_LOW_PASS>(driven_mix_A);
-        stage_processed_B = filter_[1].Process<stmlib::FILTER_MODE_LOW_PASS>(driven_mix_B);
-
+      if (harmonic_mode == 1) {
+          // Even harmonics (tube) - asymmetric
+          processed_A = stmlib::SoftLimit(aliased_A * drive + 0.2f);
+          processed_B = stmlib::SoftLimit(aliased_B * drive + 0.2f);
+      } else if (harmonic_mode == 2) {
+          // Hard clip (transistor)
+          float a = aliased_A * drive;
+          float b = aliased_B * drive;
+          if (a > 1.0f) a = 1.0f; else if (a < -1.0f) a = -1.0f;
+          if (b > 1.0f) b = 1.0f; else if (b < -1.0f) b = -1.0f;
+          processed_A = a;
+          processed_B = b;
+      } else if (harmonic_mode == 3) {
+          // Digital (quantized)
+          float a = stmlib::SoftLimit(aliased_A * drive);
+          float b = stmlib::SoftLimit(aliased_B * drive);
+          const float levels = 32.0f;
+          processed_A = floorf(a * levels) / levels;
+          processed_B = floorf(b * levels) / levels;
       } else {
-        // --- Stage 2: Full Fizzly Chebyshev ---
+          // Odd harmonics (default symmetric)
+          processed_A = stmlib::SoftLimit(aliased_A * drive);
+          processed_B = stmlib::SoftLimit(aliased_B * drive);
+      }
+    } else {
+      // --- CW: Comb Filter + Feedback (Test Equipment Resonance) ---
+      static float comb_feedback_l = 0.0f;
+      static float comb_feedback_r = 0.0f;
 
-        // Scale effect_amount from [0.3, 1.0] up to [0.0, 1.0] for control
-        float stage2_amount = (effect_amount - stage_switch_threshold) / (1.0f - stage_switch_threshold);
-        // Apply curve for smoother control within this stage
-        float stage2_curved = stage2_amount * stage2_amount;
+      // Delay time: quadratic sweep from 1920 to 48 samples
+      float inv = (1.0f - effect_amount);
+      float delay_samples = 48.0f + (1920.0f - 48.0f) * inv * inv;
 
-        // --- Smoothed Noise for Modulation ---
-        static float noise_mod = 0.0f;
-        ONE_POLE(noise_mod, (Random::GetFloat() - 0.5f), 0.01f);
+      // Feedback ramps with effect amount
+      float feedback_amount = 0.6f + effect_amount * 0.32f;  // 0.6 to 0.92
 
-        // --- Input Drive (starts from Stage 1's max and increases) ---
-        // Starts at 2x drive (where stage 1 left off) goes up to 3x total
-        float input_drive = 2.0f + stage2_curved * 1.0f;
-        float driven_mix_A = mix_A * input_drive;
-        float driven_mix_B = mix_B * input_drive;
+      // Write input + feedback to delay buffer
+      float write_l = mix_A + comb_feedback_l * feedback_amount;
+      float write_r = mix_B + comb_feedback_r * feedback_amount;
 
-        // --- Modulate Chebyshev Degree ---
-        // Degree ramps up across this stage
-        float base_degree = stage2_curved * 0.9f;
-        float modulated_degree = base_degree + (noise_mod * stage2_curved * 0.15f);
-        CONSTRAIN(modulated_degree, 0.0f, 1.0f);
-        // Drive param ramps up across this stage
-        float drive_param = 0.6f + stage2_curved * 0.1f; // Starts from ~0.5 + 0.1
+      delay_buffer_[shared_write_pos_].l = Clip16(write_l * 32768.0f);
+      delay_buffer_[shared_write_pos_].r = Clip16(write_r * 32768.0f);
 
-        // --- Chebyshev Processing ---
-        float cheby_A = Xmod<ALGORITHM_CHEBYSCHEV>(driven_mix_A, 0.0f, modulated_degree, drive_param);
-        float cheby_B = Xmod<ALGORITHM_CHEBYSCHEV>(driven_mix_B, 0.0f, modulated_degree, drive_param);
+      // Read from delay buffer
+      float read_pos = (float)shared_write_pos_ - delay_samples;
+      if (read_pos < 0.0f) read_pos += kSharedDelaySize;
 
-        // --- Post-Filter with Noise Modulation ---
-        // Filter starts fairly open and gets darker
-        float base_lpf_cutoff = 0.45f - stage2_curved * 0.20f; // Start near Stage 1's LPF
-        float cutoff_mod_depth = stage2_curved * 0.08f;
+      MAKE_INTEGRAL_FRACTIONAL(read_pos);
+      int32_t i0 = read_pos_integral;
+      int32_t i1 = i0 + 1; if (i1 >= kSharedDelaySize) i1 = 0;
+      const float kToFloat = 1.0f / 32768.0f;
 
-        float cutoff_A = base_lpf_cutoff + (noise_mod * cutoff_mod_depth);
-        CONSTRAIN(cutoff_A, 0.01f, 0.49f);
-        float cutoff_B = base_lpf_cutoff - (noise_mod * cutoff_mod_depth);
-        CONSTRAIN(cutoff_B, 0.01f, 0.49f);
+      float d_l0 = delay_buffer_[i0].l * kToFloat;
+      float d_l1 = delay_buffer_[i1].l * kToFloat;
+      float delayed_l = d_l0 + (d_l1 - d_l0) * read_pos_fractional;
 
-        // Use filter_[0] and filter_[1] for the post-filter in this stage
-        filter_[0].set_f<stmlib::FREQUENCY_FAST>(cutoff_A);
-        filter_[1].set_f<stmlib::FREQUENCY_FAST>(cutoff_B);
-        float filtered_A = filter_[0].Process<stmlib::FILTER_MODE_LOW_PASS>(cheby_A);
-        float filtered_B = filter_[1].Process<stmlib::FILTER_MODE_LOW_PASS>(cheby_B);
+      float d_r0 = delay_buffer_[i0].r * kToFloat;
+      float d_r1 = delay_buffer_[i1].r * kToFloat;
+      float delayed_r = d_r0 + (d_r1 - d_r0) * read_pos_fractional;
 
-        // --- Gain Compensation ---
-        float gain_comp = 1.0f - (stage2_curved * 0.15f);
-        stage_processed_A = filtered_A * gain_comp;
-        stage_processed_B = filtered_B * gain_comp;
+      // Apply harmonic saturation in feedback path
+      if (harmonic_mode == 1) {
+          comb_feedback_l = stmlib::SoftLimit(delayed_l + 0.2f);
+          comb_feedback_r = stmlib::SoftLimit(delayed_r + 0.2f);
+      } else if (harmonic_mode == 2) {
+          float fl = delayed_l;
+          float fr = delayed_r;
+          if (fl > 1.0f) fl = 1.0f; else if (fl < -1.0f) fl = -1.0f;
+          if (fr > 1.0f) fr = 1.0f; else if (fr < -1.0f) fr = -1.0f;
+          comb_feedback_l = fl;
+          comb_feedback_r = fr;
+      } else if (harmonic_mode == 3) {
+          const float levels = 32.0f;
+          comb_feedback_l = floorf(stmlib::SoftLimit(delayed_l) * levels) / levels;
+          comb_feedback_r = floorf(stmlib::SoftLimit(delayed_r) * levels) / levels;
+      } else {
+          comb_feedback_l = stmlib::SoftLimit(delayed_l);
+          comb_feedback_r = stmlib::SoftLimit(delayed_r);
       }
 
-      processed_A = stage_processed_A;
-      processed_B = stage_processed_B;
+      // Advance write pointer
+      shared_write_pos_++;
+      if (shared_write_pos_ >= kSharedDelaySize) shared_write_pos_ = 0;
+
+      // Output: mix of dry + comb resonance
+      float comb_mix = 0.5f + effect_amount * 0.3f;
+      processed_A = mix_A * (1.0f - comb_mix) + delayed_l * comb_mix;
+      processed_B = mix_B * (1.0f - comb_mix) + delayed_r * comb_mix;
 
     } // End CW block
 
@@ -1496,11 +1488,12 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       parameters_.modulation_parameter,
       size);
 
-  // if (!parameters_.carrier_shape) {
-  //   fill(&aux[0], &aux[size], 0.0f);
-  // }
+  // carrier_shape: 0=off(best), 1=green, 2=yellow, 3=red(most lofi)
+  int quality = 3 - parameters_.carrier_shape;  // 3=best, 0=lofi
+  float degradation = 1.0f - (quality / 3.0f);  // 0.0=pristine, 1.0=trashed
+
   short* input_samples = &input->l;
-  for (int32_t i = parameters_.carrier_shape ? 1 : 0; i < 2; ++i) {
+  for (int32_t i = 0; i < 2; ++i) {
       amplifier_[i].Process(
           parameters_.channel_drive[i],
           1.0f,
@@ -1509,22 +1502,6 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
           aux,
           2,
           size);
-  }
-  if (parameters_.carrier_shape) {
-    for (size_t i = 0; i < size; ++i) {
-      internal_modulation_[i] = static_cast<float>(input[i].l) / 32768.0f;
-    }
-    OscillatorShape xmod_shape = static_cast<OscillatorShape>(
-        parameters_.carrier_shape - 1);
-    xmod_oscillator_.Render(
-          xmod_shape,
-          parameters_.note,
-          internal_modulation_,
-          in_1,
-          size);
-    for (size_t i = 0; i < size; ++i) {
-      in_1[i] = in_1[i] * kXmodCarrierGain;
-    }
   }
 
   float effect_target = effect_interpolator.Next(); 
@@ -1540,7 +1517,7 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
     filter_[5].set_f<stmlib::FREQUENCY_FAST>(0.4f);
     // filter_[2].set_f<stmlib::FREQUENCY_FAST>(0.25f); // Hiss filter L // temporarly disabled
     filter_[3].set_f<stmlib::FREQUENCY_DIRTY>(0.25f); // Hiss filter R // try dirty filter instead of fast
-    float target_filter_cutoff = 0.05f + (1.0f - effect_amount_sqrtf) * 0.45f;
+    float target_filter_cutoff = 0.05f + (1.0f - effect_amount_sqrtf) * (0.45f - degradation * 0.25f);
     tape_lp_l_.set_f<stmlib::FREQUENCY_FAST>(target_filter_cutoff);
     tape_lp_r_.set_f<stmlib::FREQUENCY_FAST>(target_filter_cutoff);
   } else {
@@ -1671,8 +1648,9 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       float flutter_mod_r = lut_sin[flutter_i_r];
 
       // 7. Combine modulations, applying flutter scale
-      float total_mod_l = (wow_mod + flutter_mod * flutter_scale) * 0.5f * effect_amount_sqrtf;
-      float total_mod_r = (wow_mod_r + flutter_mod_r * flutter_scale) * 0.5f * effect_amount_sqrtf;
+      float wow_flutter_scale = 1.0f + degradation * 1.5f;  // 1x to 2.5x depth
+      float total_mod_l = (wow_mod + flutter_mod * flutter_scale) * 0.5f * effect_amount_sqrtf * wow_flutter_scale;
+      float total_mod_r = (wow_mod_r + flutter_mod_r * flutter_scale) * 0.5f * effect_amount_sqrtf * wow_flutter_scale;
 
       // 8. Compute final delay offsets
       const float kFixedTapeDelay = 1.0f;
@@ -1775,8 +1753,8 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
 
       // --- Saturation ---
       float shaped = effect_amount * effect_amount;
-      float drive = 1.0f + shaped * 4.0f;
-      float offset = shaped * 0.15f;
+      float drive = 1.0f + shaped * (4.0f + degradation * 4.0f);
+      float offset = shaped * (0.15f + degradation * 0.15f);
       float sat_l = stmlib::SoftLimit((delayed_l * drive) + offset);
       float sat_r = stmlib::SoftLimit((delayed_r * drive) + offset);
 
@@ -1791,8 +1769,9 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       // --- Hiss (Dynamic) ---
       const float hiss_threshold = 0.65f;
       float hiss_amount = (effect_amount > hiss_threshold) ? hiss_threshold : effect_amount;
-      float base_hiss_level = hiss_amount * 0.03f;
-      float dynamic_hiss_level = hiss_envelope_ * 2.0f * hiss_amount * 0.4f; 
+      float hiss_scale = 1.0f + degradation * 3.0f;  // 1x to 4x
+      float base_hiss_level = hiss_amount * 0.03f * hiss_scale;
+      float dynamic_hiss_level = hiss_envelope_ * 2.0f * hiss_amount * 0.4f * hiss_scale;
       float hiss_level = (base_hiss_level + dynamic_hiss_level);
 
       float hiss_raw_l = static_cast<float>(hiss_rng_state_) / 4294967296.0f;
@@ -1813,18 +1792,20 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       float dropout_max_length;
       float dropout_gain_min;
 
+      float dropout_scale = 1.0f + degradation * 3.0f;  // 1x to 4x
+
       if (effect_amount < 0.1f) { // Fresh
-          dropout_base_chance = 0.01f;
-          dropout_max_length  = 0.010f;
+          dropout_base_chance = 0.01f * dropout_scale;
+          dropout_max_length  = 0.010f * dropout_scale;
           dropout_gain_min    = 0.6f;
       } else if (effect_amount < 0.6f) { // Mid-Age
-          dropout_base_chance = 0.05f;
-          dropout_max_length  = 0.035f;
-          dropout_gain_min    = 0.4f;
+          dropout_base_chance = 0.05f * dropout_scale;
+          dropout_max_length  = 0.035f * dropout_scale;
+          dropout_gain_min    = 0.4f - degradation * 0.2f;
       } else { // Chewed
-          dropout_base_chance = 0.2f;
-          dropout_max_length  = 0.070f;
-          dropout_gain_min    = 0.2f;
+          dropout_base_chance = 0.2f * dropout_scale;
+          dropout_max_length  = 0.070f * dropout_scale;
+          dropout_gain_min    = 0.2f - degradation * 0.15f;
       }
       
       // --- State Variables ---
@@ -1863,8 +1844,10 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       + high_noise_R * (0.2f * age_chewed);
 
       // --- Noise Amount / Leveling ---
-      float noise_level = 0.02f + age_mid * 0.05f + age_chewed * 0.15f;
-      float snow_boost  = (effect_amount > 0.95f) ? (effect_amount - 0.95f) * 8.0f : 0.0f;
+      float noise_scale = 1.0f + degradation * 2.0f;  // 1x to 3x
+      float noise_level = (0.02f + age_mid * 0.05f + age_chewed * 0.15f) * noise_scale;
+      float snow_threshold = 0.95f - degradation * 0.15f;  // 0.95 to 0.80
+      float snow_boost  = (effect_amount > snow_threshold) ? (effect_amount - snow_threshold) * 8.0f : 0.0f;
       float noise_amount = (noise_level + snow_boost) * (0.8f + breathing * 1.2f);  // breathing mod
 
       // --- Dropout Logic (gets chaotic at the end) ---
@@ -1892,7 +1875,7 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       float signal_B = mix_B * dropout_gain;
 
       // --- Tape Saturation Stage ---
-      float drive = 1.0f + effect_amount * 2.0f;
+      float drive = 1.0f + effect_amount * (2.0f + degradation * 2.0f);
       signal_A = stmlib::SoftLimit(signal_A * drive);
       signal_B = stmlib::SoftLimit(signal_B * drive);
 
@@ -1922,7 +1905,7 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       if (hum_lfo_phase_ >= 1.0f) hum_lfo_phase_ -= 1.0f;
       float hum = Interpolate(lut_sin, hum_lfo_phase_, 1024.0f);
       hum = hum * (1.0f + 0.25f * hum);  // adds a bit of 2nd harmonic distortion
-      float hum_amount = effect_amount * 0.03f;
+      float hum_amount = effect_amount * (0.03f + degradation * 0.04f);
       
       // --- Add Noise & Hum ---
       processed_A = filtered_A + (vhs_snow_L * noise_amount * 0.04f) + (hum * hum_amount);
@@ -1965,11 +1948,11 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
        parameters_.modulation_parameter,
        size);
 
-    // if (!parameters_.carrier_shape) {
-    //   fill(&aux[0], &aux[size], 0.0f);
-    // }
+    // carrier_shape: 0=off(best), 1=green, 2=yellow, 3=red(most lofi)
+    int quality = 3 - parameters_.carrier_shape;  // 3=best, 0=lofi
+
     short* input_samples = &input->l;
-    for (int32_t i = parameters_.carrier_shape ? 1 : 0; i < 2; ++i) {
+    for (int32_t i = 0; i < 2; ++i) {
       amplifier_[i].Process(
           parameters_.channel_drive[i],
           1.0f,
@@ -1980,23 +1963,6 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
           size);
     }
 
-    if (parameters_.carrier_shape) {
-      for (size_t i = 0; i < size; ++i) {
-        internal_modulation_[i] = static_cast<float>(input[i].l) / 32768.0f;
-      }
-      OscillatorShape xmod_shape = static_cast<OscillatorShape>(
-          parameters_.carrier_shape - 1);
-      xmod_oscillator_.Render(
-            xmod_shape,
-            parameters_.note,
-            internal_modulation_,
-            in_1,
-            size);
-      for (size_t i = 0; i < size; ++i) {
-        in_1[i] = in_1[i] * kXmodCarrierGain;
-      }
-    }
-
   while (size--) {
     bool write_to_buffer = true;
 
@@ -2005,11 +1971,11 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
     float effect_skewed_target = (x_target * x_target * x_target + 1.0f) * 0.5f;
     float algo = (effect_skewed_target * 2.0f) - 1.0f;
     float effect_amount = fabs(algo);
-    float effect_amount_sqrtf = sqrtf(effect_amount);
-    
-    // --- Clock to write every other sample ---
-    static bool write_clock = false;
-    write_clock = !write_clock;
+
+    // --- Write clock: lofi writes every other sample ---
+    static int write_counter = 0;
+    write_counter++;
+    bool write_clock = (quality == 0) ? (write_counter & 1) : true;
 
     float crossfade = crossfade_interpolator.Next(); // Crossfader
 
@@ -2045,42 +2011,22 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
         static float pitch_offset_l_ = 0.0f;
         static float pitch_offset_r_ = 0.0f;
 
-        static int lfo_counter_ = 0;
-        static float smear_mod_held_ = 0.0f;
-        static float chorus_mod_held_ = 0.0f;
-
         // Calculate Target Delay
         float base_delay_samples = 2880.0f + effect_amount * 8640.0f;
-        const int kLfoUpdateRate = 48; // Update LFOs every 48 samples
-        if (lfo_counter_ == 0) {
-          // Update Smear LFO
-          smear_lfo_phase_ += (0.2f * kLfoUpdateRate) / 96000.0f; // Scale increment
-          if (smear_lfo_phase_ >= 1.0f) {
-              smear_lfo_phase_ -= 1.0f;
-              // smear_lfo_target_val_ = Random::GetFloat();
 
-              // float new_target = Random::GetFloat();
-              // smear_lfo_target_val_ = 0.95f * smear_lfo_target_val_ + 0.05f * new_target;
-              smear_lfo_target_val_ += (Random::GetFloat() - 0.5f) * 0.1f; 
-              smear_lfo_target_val_ = fminf(1.0f, fmaxf(0.0f, smear_lfo_target_val_));
-          }
-          smear_mod_held_ = (smear_lfo_current_val_ - 0.5f) * 2.0f;
-
-          // Update the Chorus LFO
-          chorus_lfo_phase_ += (0.3f * kLfoUpdateRate) / 96000.0f; // Scale increment
-          if (chorus_lfo_phase_ >= 1.0f) chorus_lfo_phase_ -= 1.0f;
-            chorus_mod_held_ = Interpolate(lut_sin, chorus_lfo_phase_, 1024.0f);
+        // Update Smear LFO (per-sample)
+        smear_lfo_phase_ += 0.2f / 96000.0f;
+        if (smear_lfo_phase_ >= 1.0f) {
+            smear_lfo_phase_ -= 1.0f;
+            smear_lfo_target_val_ = Random::GetFloat();
         }
+        ONE_POLE(smear_lfo_current_val_, smear_lfo_target_val_, 0.0005f);
+        float smear_mod = (smear_lfo_current_val_ - 0.5f) * 2.0f;
 
-        // We still need to run the smoothing filter every sample
-        ONE_POLE(smear_lfo_current_val_, smear_lfo_target_val_, 0.00001f);
-
-        // Increment counter
-        lfo_counter_ = (lfo_counter_ + 1) % kLfoUpdateRate;
-
-        // Use the "held" (cached) LFO values
-        float smear_mod = smear_mod_held_ * 0.5f;  // halve range
-        float chorus_mod = chorus_mod_held_;
+        // Update Chorus LFO (per-sample)
+        chorus_lfo_phase_ += 0.3f / 96000.0f;
+        if (chorus_lfo_phase_ >= 1.0f) chorus_lfo_phase_ -= 1.0f;
+        float chorus_mod = Interpolate(lut_sin, chorus_lfo_phase_, 1024.0f);
         // Calculate Final Read Positions
         float smear_mod_amount = effect_amount * 1920.0f; 
         float stereo_offset = (100.0f + chorus_mod * 100.0f) * effect_amount;
@@ -2095,133 +2041,63 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
         delay_r_samples = fmaxf(delay_r_samples, min_delay);
 
         const float pitch_threshold = 0.8f;
+        float pitch_shift_rate = 0.0f;
 
-        // Calculate the ramp. This will be negative or zero if we're below the threshold.
-        float pitch_ramp = (effect_amount - pitch_threshold) / (1.0f - pitch_threshold);
-        
-        // Use fmaxf to clamp the ramp at 0. This is "branchless" and fast.
-        // If ramp was negative, it becomes 0. If it was positive, it stays.
-        pitch_ramp = fmaxf(0.0f, pitch_ramp); 
+        if (effect_amount > pitch_threshold) {
+            float pitch_ramp = (effect_amount - pitch_threshold) / (1.0f - pitch_threshold);
+            pitch_shift_rate = 0.498f * pitch_ramp;
+        } else {
+            // Reset offsets when not pitch-shifting
+            pitch_offset_l_ = 0.0f;
+            pitch_offset_r_ = 0.0f;
+        }
 
-        // Now pitch_shift_rate is 0.0 if ramp is 0, or a positive value.
-        float pitch_shift_rate = 0.498f * pitch_ramp;
-          
         pitch_offset_l_ += pitch_shift_rate;
         pitch_offset_r_ += pitch_shift_rate;
         const float buffer_size_f = (float)kSharedDelaySize;
 
-        // if (pitch_offset_l_ >= buffer_size_f) pitch_offset_l_ -= buffer_size_f;
-        // else if (pitch_offset_l_ < 0.0f) pitch_offset_l_ += buffer_size_f;
+        if (pitch_offset_l_ >= buffer_size_f) pitch_offset_l_ -= buffer_size_f;
+        else if (pitch_offset_l_ < 0.0f) pitch_offset_l_ += buffer_size_f;
 
-        // if (pitch_offset_r_ >= buffer_size_f) pitch_offset_r_ -= buffer_size_f;
-        // else if (pitch_offset_r_ < 0.0f) pitch_offset_r_ += buffer_size_f;
-
-        pitch_offset_l_ -= buffer_size_f * floorf(pitch_offset_l_ / buffer_size_f);
-        pitch_offset_r_ -= buffer_size_f * floorf(pitch_offset_r_ / buffer_size_f);
+        if (pitch_offset_r_ >= buffer_size_f) pitch_offset_r_ -= buffer_size_f;
+        else if (pitch_offset_r_ < 0.0f) pitch_offset_r_ += buffer_size_f;
         
         // Apply the pitch offset to the read position
         float read_pos_l_to_use = (float)shared_write_pos_ - delay_l_samples + pitch_offset_l_;
         float read_pos_r_to_use = (float)shared_write_pos_ - delay_r_samples + pitch_offset_r_;
         
 
-        // --- Read audio (L Channel) ---
-        float delayed_l;
+        // --- Read audio (L & R Channels) ---
+        float delayed_l, delayed_r;
+
+        // Wrap read positions into [0, kSharedDelaySize)
+        float rp_l = read_pos_l_to_use;
+        if (rp_l >= kSharedDelaySize) rp_l -= kSharedDelaySize;
+        else if (rp_l < 0.0f) rp_l += kSharedDelaySize;
+
+        float rp_r = read_pos_r_to_use;
+        if (rp_r >= kSharedDelaySize) rp_r -= kSharedDelaySize;
+        else if (rp_r < 0.0f) rp_r += kSharedDelaySize;
+
+        const float kToFloat = 1.0f / 32768.0f;
+
+        // --- Linear interpolation (2-point) ---
         {
-            float read_pos = read_pos_l_to_use;
-            if (read_pos >= kSharedDelaySize) read_pos -= kSharedDelaySize;
-            else if (read_pos < 0.0f) read_pos += kSharedDelaySize;
-
-            read_pos = roundf(read_pos * 10000.0f) * 0.0001f;
-            MAKE_INTEGRAL_FRACTIONAL(read_pos);
-            int32_t index_integral = read_pos_integral;
-            float index_fractional = read_pos_fractional;
-
-            const float kToFloat = 1.0f / 32768.0f;
-            const int mask = kSharedDelaySize - 1;
-
-            const float x0 = delay_buffer_[ index_integral & mask ].l * kToFloat;
-            const float x1 = delay_buffer_[ (index_integral + 1) & mask ].l * kToFloat;
-
-            // Linear interpolation
-            delayed_l = x0 + (x1 - x0) * index_fractional;
+            MAKE_INTEGRAL_FRACTIONAL(rp_l);
+            int32_t i0 = rp_l_integral;
+            int32_t i1 = i0 + 1; if (i1 >= kSharedDelaySize) i1 = 0;
+            float x0 = delay_buffer_[i0].l * kToFloat;
+            float x1 = delay_buffer_[i1].l * kToFloat;
+            delayed_l = x0 + (x1 - x0) * rp_l_fractional;
         }
-
-        // --- Read audio (R Channel) ---
-        float delayed_r;
         {
-            float read_pos = read_pos_r_to_use;
-            if (read_pos >= kSharedDelaySize) read_pos -= kSharedDelaySize;
-            else if (read_pos < 0.0f) read_pos += kSharedDelaySize;
-
-            read_pos = roundf(read_pos * 10000.0f) * 0.0001f;
-            MAKE_INTEGRAL_FRACTIONAL(read_pos);
-            int32_t index_integral = read_pos_integral;
-            float index_fractional = read_pos_fractional;
-
-            const float kToFloat = 1.0f / 32768.0f;
-            const int mask = kSharedDelaySize - 1;
-
-            const float x0 = delay_buffer_[ index_integral & mask ].r * kToFloat;
-            const float x1 = delay_buffer_[ (index_integral + 1) & mask ].r * kToFloat;
-
-            // Linear interpolation
-            delayed_r = x0 + (x1 - x0) * index_fractional;
+            MAKE_INTEGRAL_FRACTIONAL(rp_r);
+            int32_t i0 = rp_r_integral;
+            int32_t i1 = i0 + 1; if (i1 >= kSharedDelaySize) i1 = 0;
+            float x0 = delay_buffer_[i0].r * kToFloat;
+            float x1 = delay_buffer_[i1].r * kToFloat;
+            delayed_r = x0 + (x1 - x0) * rp_r_fractional;
         }
-
-
-        //HERMITE INTERPOLATION READS
-        // // --- Read audio (L Channel) ---
-        // float delayed_l;
-        // {
-        //     float read_pos = read_pos_l_to_use;
-        //     if (read_pos >= kSharedDelaySize) read_pos -= kSharedDelaySize;
-        //     else if (read_pos < 0.0f) read_pos += kSharedDelaySize;
-        //     MAKE_INTEGRAL_FRACTIONAL(read_pos);
-        //     int32_t index_integral = read_pos_integral;
-        //     float index_fractional = read_pos_fractional;
-        //     const float kToFloat = 1.0f / 32768.0f;
-        //     const int mask = kSharedDelaySize - 1;
-        //     const float xm1 = delay_buffer_[(index_integral - 1) & mask].l * kToFloat;
-        //     const float x0  = delay_buffer_[ index_integral & mask].l * kToFloat;
-        //     const float x1  = delay_buffer_[(index_integral + 1) & mask].l * kToFloat;
-        //     const float x2  = delay_buffer_[(index_integral + 2) & mask].l * kToFloat;
-
-        //     const float c = (x1 - xm1) * 0.5f;
-        //     const float v = x0 - x1;
-        //     const float w = c + v;
-        //     const float a = w + v + (x2 - x0) * 0.5f;
-        //     const float b_neg = w + a;
-
-        //     const float t = index_fractional;
-        //     delayed_l = (((a * t - b_neg) * t + c) * t + x0);
-        // }
-
-        // // --- Read audio (R Channel) ---
-        // float delayed_r;
-        // {
-        //     float read_pos = read_pos_r_to_use;
-        //     if (read_pos >= kSharedDelaySize) read_pos -= kSharedDelaySize;
-        //     else if (read_pos < 0.0f) read_pos += kSharedDelaySize;
-        //     MAKE_INTEGRAL_FRACTIONAL(read_pos);
-        //     int32_t index_integral = read_pos_integral;
-        //     float index_fractional = read_pos_fractional;
-        //     const float kToFloat = 1.0f / 32768.0f;
-        //     const int mask = kSharedDelaySize - 1;
-
-        //     const float xm1 = delay_buffer_[(index_integral - 1) & mask].r * kToFloat;
-        //     const float x0  = delay_buffer_[ index_integral & mask].r * kToFloat;
-        //     const float x1  = delay_buffer_[(index_integral + 1) & mask].r * kToFloat;
-        //     const float x2  = delay_buffer_[(index_integral + 2) & mask].r * kToFloat;
-
-        //     const float c = (x1 - xm1) * 0.5f;
-        //     const float v = x0 - x1;
-        //     const float w = c + v;
-        //     const float a = w + v + (x2 - x0) * 0.5f;
-        //     const float b_neg = w + a;
-
-        //     const float t = index_fractional;
-        //     delayed_r = (((a * t - b_neg) * t + c) * t + x0);
-        // }
 
         // --- "Smear Magic" (Internal Feedback) ---
         float effect_ramp = fminf(effect_amount / pitch_threshold, 1.0f);
@@ -2247,13 +2123,15 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
         processed_B = feedback_r;
       } else {
         // --- CW: Glitches ---
+        float effect_amount_sqrtf = sqrtf(effect_amount);
         static int decimation_counter_ = 0;
         static float latched_l_ = 0.0f;
         static float latched_r_ = 0.0f;
         static bool decimator_needs_reset_ = true;
 
-        // 32kHz Decimator for glitch stability
-        decimation_counter_ = (decimation_counter_ + 1) % 3;
+        // Decimator: quality 0=lofi(÷6), 1=normal(÷3), 2=high(÷2), 3=best(none)
+        int decimation_factor = (quality == 0) ? 6 : (quality == 1) ? 3 : (quality == 2) ? 2 : 1;
+        decimation_counter_ = (decimation_counter_ + 1) % decimation_factor;
         if (decimation_counter_ == 0 || decimator_needs_reset_) {
             // "Latch" a new sample
             latched_l_ = mix_A;
@@ -2509,7 +2387,8 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
         delay_buffer_[shared_write_pos_].r = last_written_r;
 
         // always advance pointer to keep timeline continuous
-        shared_write_pos_ = (shared_write_pos_ + 1) & (kSharedDelaySize - 1);
+        shared_write_pos_++;
+        if (shared_write_pos_ >= kSharedDelaySize) shared_write_pos_ = 0;
     }
 
     output->l = Clip16(out_A * 32768.0f);
