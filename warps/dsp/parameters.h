@@ -45,10 +45,10 @@ enum FeatureMode {
   FEATURE_MODE_CRUSH_MIXER,
   FEATURE_MODE_CASSETTE_MIXER,
   FEATURE_MODE_LOSSY_MIXER,
+  FEATURE_MODE_RADIO_MIXER,
+  FEATURE_MODE_DREAMY_MIXER,
   FEATURE_MODE_FREQUENCY_SHIFTER,
   FEATURE_MODE_BITCRUSHER,
-  FEATURE_MODE_COMPARATOR,
-  FEATURE_MODE_DOPPLER,
   FEATURE_MODE_DELAY,
   FEATURE_MODE_META,
 };
@@ -70,6 +70,9 @@ struct Parameters {
   bool level_2_cv_patched;
 
   int32_t carrier_shape;  // 0 = external
+
+  bool algorithm_frozen; // true = effect knob frozen during mode switch
+  float frozen_algorithm; // the raw_algorithm value to hold while frozen
   
   // Apply a non-linear response to the parameter of all algorithms between
   // 1 and 4.

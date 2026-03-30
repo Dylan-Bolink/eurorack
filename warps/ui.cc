@@ -59,26 +59,12 @@ const uint8_t Ui::feature_mode_palette_[10][3] = {
   { 255, 64, 0 },
   { 0, 192, 64 },
   { 255, 0, 64 },
+  { 255, 192, 0 },
+  { 128, 0, 255 },
   { 0, 255, 192 },
   { 64, 255, 0 },
-  { 0, 0, 255 },
-  { 255, 255, 0 },
   { 255, 0, 255 },
   { 0, 255, 192 },
-  { 255, 0, 0 },
-};
-
-/* static */
-const uint8_t Ui::freq_shifter_palette_[10][3] = {
-  { 0, 0, 64 },
-  { 0, 0, 255 },
-  { 0, 255, 192 },
-  { 0, 192, 64 },
-  { 64, 255, 0 },
-  { 255, 255, 0 },
-  { 255, 192, 0 },
-  { 255, 64, 0 },
-  { 255, 0, 0 },
   { 255, 0, 0 },
 };
 
@@ -117,6 +103,8 @@ void Ui::Init(Settings* settings, CvScaler* cv_scaler, Modulator* modulator) {
 
   last_algo_pot_ = 0.0f;
   feature_mode_changed_ = false;
+  catch_up_active_ = false;
+  catch_up_target_ = 0.0f;
 }
 
 void Ui::UpdateSettings() {
@@ -164,6 +152,16 @@ void Ui::Poll() {
         const Parameters& p = modulator_->parameters();
         const uint8_t (*palette)[3];
 
+        // Knob catch-up: unfreeze when pot crosses the frozen value
+        if (catch_up_active_) {
+            const float kCatchUpThreshold = 0.02f;
+            float diff = p.raw_algorithm_pot - catch_up_target_;
+            if (diff > -kCatchUpThreshold && diff < kCatchUpThreshold) {
+                modulator_->mutable_parameters()->algorithm_frozen = false;
+                catch_up_active_ = false;
+            }
+        }
+
         switch (modulator_->feature_mode()) {
           case FEATURE_MODE_META:
             {
@@ -181,11 +179,7 @@ void Ui::Poll() {
               leds_.set_main(rgb[0], rgb[1], rgb[2]);
             }
             break;
-          case FEATURE_MODE_CRUSH_MIXER:
-          case FEATURE_MODE_CASSETTE_MIXER:
-          case FEATURE_MODE_LOSSY_MIXER:
-          case FEATURE_MODE_FREQUENCY_SHIFTER:
-          case FEATURE_MODE_DELAY:
+          default:
             {
                float knob = p.raw_algorithm;
                 const float gamma = 2.2f;
@@ -230,37 +224,7 @@ void Ui::Poll() {
                 leds_.set_main(rgb[0], rgb[1], rgb[2]);
             }
             break;
-
-          default:
-            {
-              zone = p.raw_algorithm;
-              palette = freq_shifter_palette_;
-              zone *= 8.0f;
-              MAKE_INTEGRAL_FRACTIONAL(zone);
-
-              int32_t zone_fractional_i = static_cast<int32_t>(
-                  zone_fractional * 256.0f);
-
-              for (int32_t i = 0; i < 3; ++i) {
-                int32_t a = palette[zone_integral][i];
-                 // Ensure we don't read past the end of the palette
-                int32_t b = palette[min(zone_integral + 1, static_cast<int32_t>(9))][i];
-                rgb[i] = a + ((b - a) * zone_fractional_i >> 8);
-              }
-              leds_.set_main(rgb[0], rgb[1], rgb[2]);
-            }
-            break;
         }
-        // zone *= 8.0f;
-        // MAKE_INTEGRAL_FRACTIONAL(zone);
-        // int32_t zone_fractional_i = static_cast<int32_t>(
-        //     zone_fractional * 256.0f);
-        // for (int32_t i = 0; i < 3; ++i) {
-        //   int32_t a = palette[zone_integral][i];
-        //   int32_t b = palette[zone_integral + 1][i];
-        //   rgb[i] = a + ((b - a) * zone_fractional_i >> 8);
-        // }
-        // leds_.set_main(rgb[0], rgb[1], rgb[2]);
         leds_.set_osc(
             carrier_shape_ >= 2 ? 255 : 0,
             carrier_shape_ > 0 && carrier_shape_ <= 2 ? 255 : 0);
@@ -345,6 +309,10 @@ void Ui::OnSwitchPressed(const Event& e) {
           break;
         case UI_MODE_NORMAL:
           last_algo_pot_ = modulator_->parameters().raw_algorithm_pot;
+          // Freeze the effect knob so mode switching is inaudible
+          modulator_->mutable_parameters()->algorithm_frozen = true;
+          modulator_->mutable_parameters()->frozen_algorithm = modulator_->parameters().raw_algorithm;
+          catch_up_active_ = true;
           mode_ = UI_MODE_FEATURE_SWITCH;
           break;
         default:
@@ -379,8 +347,13 @@ void Ui::OnSwitchReleased(const Event& e) {
          mode_ = UI_MODE_NORMAL;
          if (feature_mode_changed_) {
            feature_mode_changed_ = false;
+           // Mode changed — keep frozen, catch-up will unfreeze
+           catch_up_target_ = modulator_->parameters().frozen_algorithm;
          }
          else {
+           // Just a quality tap — unfreeze immediately, no catch-up needed
+           modulator_->mutable_parameters()->algorithm_frozen = false;
+           catch_up_active_ = false;
            carrier_shape_ = (carrier_shape_ + 1) & 3;
          }
          UpdateSettings();

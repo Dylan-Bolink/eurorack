@@ -42,6 +42,14 @@ using namespace std;
 using namespace stmlib;
 
 const float kXmodCarrierGain = 0.5f;
+const float kSamplePeriod = 1.0f / 96000.0f;
+const float kToFloat = 1.0f / 32768.0f;
+
+inline float SkewRawAlgorithm(float r) {
+    float x = r * 2.0f - 1.0f;
+    float skewed = (x * x * x + 1.0f) * 0.5f;
+    return skewed * 2.0f - 1.0f;
+}
 
 void Modulator::Init(float sample_rate) {
   bypass_ = false;
@@ -67,6 +75,8 @@ void Modulator::Init(float sample_rate) {
   previous_parameters_.modulation_algorithm = 0.0f;
   previous_parameters_.modulation_parameter = 0.0f;
   previous_parameters_.note = 48.0f;
+  previous_parameters_.algorithm_frozen = false;
+  previous_parameters_.frozen_algorithm = 0.0f;
 
   feedback_sample_ = 0.0f;
   delay_interpolation_ = INTERPOLATION_HERMITE;
@@ -85,6 +95,8 @@ void Modulator::Init(float sample_rate) {
 
   // Tape effect filters
   shared_write_pos_ = 0;
+  drift_decimation_active_ = false;
+  drift_decimate_counter_ = 0;
   for (int i = 0; i < kSharedDelaySize; ++i) {
     delay_buffer_[i].l = 0;
     delay_buffer_[i].r = 0;
@@ -95,6 +107,11 @@ void Modulator::Init(float sample_rate) {
 
   lossy_bpf_l_.Init();
   lossy_bpf_r_.Init();
+
+  // Radio mixer
+  radio_carrier_phase_ = 0.0f;
+  radio_fade_lfo_phase_ = 0.0f;
+  radio_static_lp_ = 0.0f;
 }
 
 void Modulator::ProcessFreqShifter(
@@ -215,78 +232,6 @@ void Modulator::ProcessFreqShifter(
   feedback_sample_ = feedback_sample;
   previous_parameters_ = parameters_;
 }
-
-// void Modulator::ProcessVocoder(
-//     ShortFrame* input,
-//     ShortFrame* output,
-//     size_t size) {
-//   float* carrier = buffer_[0];
-//   float* modulator = buffer_[1];
-//   float* main_output = buffer_[0];
-//   float* aux_output = buffer_[2];
-
-//   if (!parameters_.carrier_shape) {
-//     fill(&aux_output[0], &aux_output[size], 0.0f);
-//   }
-
-//   // Convert audio inputs to float and apply VCA/saturation (5.8% per channel)
-//   short* input_samples = &input->l;
-//   for (int32_t i = parameters_.carrier_shape ? 1 : 0; i < 2; ++i) {
-//       amplifier_[i].Process(
-//           parameters_.channel_drive[i],
-//           1.0f,
-//           input_samples + i,
-//           buffer_[i],
-//           aux_output,
-//           2,
-//           size);
-//   }
-
-//   // If necessary, render carrier. Otherwise, sum signals 1 and 2 for aux out.
-//   if (parameters_.carrier_shape) {
-//     // Scale phase-modulation input.
-//     for (size_t i = 0; i < size; ++i) {
-//       internal_modulation_[i] = static_cast<float>(input[i].l) / 32768.0f;
-//     }
-//     OscillatorShape vocoder_shape = static_cast<OscillatorShape>(
-//         parameters_.carrier_shape + 1);
-//     OscillatorShape square_shape = static_cast<OscillatorShape>(3);
-
-//     // Outside of the transition zone between the cross-modulation and vocoding
-//     // algorithm, we need to render only one of the two oscillators.
-//     float carrier_gain = vocoder_oscillator_.Render(
-//           vocoder_shape,
-//           parameters_.note,
-//           internal_modulation_,
-//           carrier,
-//           size);
-    
-//     square_oscillator_.Render(
-//           square_shape,
-//           parameters_.note,
-//           non_modulation_,
-//           aux_output,
-//           size);
-//     for (size_t i = 0; i < size; ++i) {
-//       carrier[i] = carrier[i] * carrier_gain;
-//     }
-//   }
-
-//   float release_time = parameters_.modulation_parameter;
-//   vocoder_.set_release_time(release_time * (2.0f - release_time));
-//   vocoder_.set_formant_shift(parameters_.modulation_algorithm);
-//   vocoder_.Process(modulator, carrier, main_output, size);
-
-//   // Convert back to integer and clip.
-//   while (size--) {
-//     output->l = Clip16(static_cast<int32_t>(*main_output * 32768.0f));
-//     output->r = Clip16(static_cast<int32_t>(*aux_output * 16384.0f));
-//     ++main_output;
-//     ++aux_output;
-//     ++output;
-//   }
-//   previous_parameters_ = parameters_;
-// }
 
 void Modulator::ProcessMeta(
     ShortFrame* input,
@@ -843,114 +788,6 @@ void Modulator::ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size)
   previous_parameters_ = parameters_;
 }
 
-void Modulator::ProcessDoppler(ShortFrame* input, ShortFrame* output, size_t size) {
-  ShortFrame *buffer = delay_buffer_;
-
-  static size_t cursor = 0;
-  static float lfo_phase = 0.0f;
-  static float distance = 1.0f;
-  static float angle = 1.0f;
-
-  float x = previous_parameters_.raw_algorithm * 2.0f - 1.0f;
-  float x_end = parameters_.raw_algorithm * 2.0f - 1.0f;
-
-  float y = previous_parameters_.modulation_parameter * 2.0f;
-  float y_end = parameters_.modulation_parameter * 2.0f;
-
-  float lfo_freq = parameters_.channel_drive[0]
-    * parameters_.channel_drive[0]
-    * 50.0f;
-  float lfo_amplitude = parameters_.channel_drive[1];
-
-  float step = 1.0f / static_cast<float>(size);
-  float x_increment = (x_end - x) * step;
-  float y_increment = (y_end - y) * step;
-
-  int8_t shape = parameters_.carrier_shape;
-
-  float atten_factor =
-    shape == 0 ? 0.5f :
-    shape == 1 ? 4.0f :
-    shape == 2 ? 8.0f :
-    shape == 3 ? 15.0f : 0;
-
-  float room_size =
-    shape == 0 ? 100 :
-    shape == 1 ? (DELAY_SIZE - 1) / 10.0f :
-    shape == 2 ? (DELAY_SIZE - 1) / 5.0f :
-    shape == 3 ? (DELAY_SIZE - 1) / 2.0f : 0;
-
-  while (size--) {
-
-    // write input to buffer
-    buffer[cursor].l = input->l;
-    buffer[cursor].r = input->r;
-
-    // LFOs
-    float sin = Interpolate(lut_sin, lfo_phase, 1024.0f);
-    float cos = Interpolate(lut_sin + 256, lfo_phase, 1024.0f);
-
-    float x_lfo = x + sin * lfo_amplitude + 0.05f; // offset avoids discontinuity at 0
-    float y_lfo = y + cos  * lfo_amplitude;
-    CONSTRAIN(x_lfo, -1.0f, 1.0f);
-    CONSTRAIN(y_lfo, -1.0f, 2.0f);
-
-    // compute angular coordinates
-    float di = sqrtf(x_lfo * x_lfo + y_lfo * y_lfo); // 0..sqrt(5)
-    float an = Interpolate(lut_arcsin, (x_lfo/di + 1.0f) * 0.5f, 256.0f);
-    di /= 2.237;		// sqrt(5)
-
-    ONE_POLE(distance, di, 0.001f);
-    ONE_POLE(angle, an, 0.001f);
-
-    // compute binaural delay
-    float binaural_delay = angle * (96000.0f * 0.0015f); // -1.5ms..1.5ms
-    float delay_l = distance * room_size + (angle > 0 ? binaural_delay : 0);
-    float delay_r = distance * room_size + (angle < 0 ? -binaural_delay : 0);
-
-    // linear delay interpolation
-    MAKE_INTEGRAL_FRACTIONAL(delay_l);
-    MAKE_INTEGRAL_FRACTIONAL(delay_r);
-
-    int16_t index_l = cursor - delay_l_integral;
-    if (index_l < 0) index_l += DELAY_SIZE;
-    int16_t index_r = cursor - delay_r_integral;
-    if (index_r < 0) index_r += DELAY_SIZE;
-
-    ShortFrame a_l = buffer[index_l];
-    ShortFrame b_l = buffer[index_l == 0 ? DELAY_SIZE - 1 : index_l - 1];
-    ShortFrame a_r = buffer[index_r];
-    ShortFrame b_r = buffer[index_r == 0 ? DELAY_SIZE - 1 : index_r - 1];
-
-    short s1_l = a_l.l + (b_l.l - a_l.l) * delay_l_fractional;
-    short s2_l = a_l.r + (b_l.r - a_l.r) * delay_l_fractional;
-    short s1_r = a_r.l + (b_r.l - a_r.l) * delay_r_fractional;
-    short s2_r = a_r.r + (b_r.r - a_r.r) * delay_r_fractional;
-
-    // distance attenuation
-    float atten = 1.0f + atten_factor * distance * distance;
-    s1_l /= atten;
-    s2_l /= atten;
-    s1_r /= atten;
-    s2_r /= atten;
-
-    float fade_in = Interpolate(lut_xfade_in, (angle + 1.0f) / 2.0f, 256.0f);
-    float fade_out = Interpolate(lut_xfade_out, (angle + 1.0f) / 2.0f, 256.0f);
-
-    output->l = s2_l * fade_in + s1_l * fade_out;
-    output->r = s1_r * fade_in + s2_r * fade_out;
-
-    x += x_increment;
-    y += y_increment;
-    lfo_phase += lfo_freq / 96000.0f;
-    if (lfo_phase > 1.0f) lfo_phase--;
-    input++;
-    output++;
-    cursor = (cursor + 1) % DELAY_SIZE;
-  }
-
-  previous_parameters_ = parameters_;
-}
 
 void Modulator::Process(ShortFrame* input, ShortFrame* output, size_t size) {
   if (bypass_) {
@@ -972,20 +809,20 @@ void Modulator::Process(ShortFrame* input, ShortFrame* output, size_t size) {
     ProcessLossyMixer(input, output, size);
     break;
 
+  case FEATURE_MODE_RADIO_MIXER:
+    ProcessRadioMixer(input, output, size);
+    break;
+
+  case FEATURE_MODE_DREAMY_MIXER:
+    ProcessDreamyMixer(input, output, size);
+    break;
+
   case FEATURE_MODE_FREQUENCY_SHIFTER:
     ProcessFreqShifter(input, output, size);
     break;
 
   case FEATURE_MODE_BITCRUSHER:
     ProcessBitcrusher(input, output, size);
-    break;
-
-  case FEATURE_MODE_COMPARATOR:
-    Process1<ALGORITHM_COMPARATOR_CHEBYSCHEV>(input, output, size);
-    break;
-
-  case FEATURE_MODE_DOPPLER:
-    ProcessDoppler(input, output, size);
     break;
 
   case FEATURE_MODE_DELAY:
@@ -1295,82 +1132,81 @@ inline float Modulator::Xmod<ALGORITHM_NOP>(
   return modulator;
 }
 
-void Modulator::ProcessCrushMixer(ShortFrame* input, ShortFrame* output, size_t size) {
-  float* in_1 = buffer_[0];
-  float* in_2 = buffer_[1];
+// --- Shared mixer helpers ---
+
+inline void Modulator::MixerPrepareInputs(ShortFrame* input, size_t size) {
   float* aux = buffer_[2];
-
-  // carrier_shape selects harmonic distortion character
-  // 0=off(odd), 1=green(even/tube), 2=yellow(hard clip), 3=red(digital)
-  int harmonic_mode = parameters_.carrier_shape;
-
   short* input_samples = &input->l;
   for (int32_t i = 0; i < 2; ++i) {
-      amplifier_[i].Process(
-          parameters_.channel_drive[i],
-          1.0f,
-          input_samples + i,
-          buffer_[i],
-          aux,
-          2,
-          size);
+    amplifier_[i].Process(
+        parameters_.channel_drive[i], 1.0f,
+        input_samples + i, buffer_[i], aux, 2, size);
   }
+}
 
-  ParameterInterpolator effect_interpolator(
-      &previous_parameters_.raw_algorithm,
-      parameters_.raw_algorithm,
-      size);
+inline MixerFrame Modulator::MixerComputeFrame(
+    float x_1, float x_2, float crossfade, float algo) {
+  MixerFrame f;
+  f.algo = algo;
+  f.crossfade = crossfade;
+  f.effect_amount = fabs(algo);
+  float fade_in = Interpolate(lut_xfade_in, crossfade, 256.0f);
+  float fade_out = Interpolate(lut_xfade_out, crossfade, 256.0f);
+  f.mix_A = x_1 * fade_out + x_2 * fade_in;
+  f.mix_B = x_1 * fade_in + x_2 * fade_out;
+  const float xfade_threshold = 0.05f;
+  f.xfade_amount = f.effect_amount < xfade_threshold
+      ? f.effect_amount / xfade_threshold : 1.0f;
+  return f;
+}
 
-  ParameterInterpolator crossfade_interpolator(
+inline void Modulator::MixerWriteOutput(
+    ShortFrame* output, const MixerFrame& f,
+    float processed_A, float processed_B) {
+  float fade_wet = Interpolate(lut_xfade_in, f.xfade_amount, 256.0f);
+  float fade_dry = Interpolate(lut_xfade_out, f.xfade_amount, 256.0f);
+  output->l = Clip16((f.mix_A * fade_dry + processed_A * fade_wet) * 32768.0f);
+  output->r = Clip16((f.mix_B * fade_dry + processed_B * fade_wet) * 32768.0f);
+}
+
+inline void Modulator::MixerFinalize() {
+  previous_parameters_.raw_algorithm = parameters_.raw_algorithm;
+  previous_parameters_.modulation_parameter = parameters_.modulation_parameter;
+}
+
+// --- Mixer modes ---
+void Modulator::ProcessCrushMixer(ShortFrame* input, ShortFrame* output, size_t size) {
+  MixerPrepareInputs(input, size);
+  int32_t quality_mode = parameters_.carrier_shape;
+
+  float algo_start = SkewRawAlgorithm(previous_parameters_.raw_algorithm);
+  float algo_end = SkewRawAlgorithm(parameters_.raw_algorithm);
+  ParameterInterpolator algo_interp(&algo_start, algo_end, size);
+  ParameterInterpolator xfade_interp(
       &previous_parameters_.modulation_parameter,
-      parameters_.modulation_parameter,
-      size);
+      parameters_.modulation_parameter, size);
+
+  float* in_1 = buffer_[0];
+  float* in_2 = buffer_[1];
 
   while (size--) {
-    float p2 = crossfade_interpolator.Next(); // Crossfader
-    float p1_raw =  effect_interpolator.Next(); // Effect Knob
-    float x = p1_raw * 2.0f - 1.0f;
-    float p1_skewed = (x * x * x + 1.0f) * 0.5f;
-    float algo = (p1_skewed * 2.0f) - 1.0f;
-    
-    float x_1 = *in_1++; 
-    float x_2 = *in_2++;
-
-    float fade_in = Interpolate(lut_xfade_in, p2, 256.0f);
-    float fade_out = Interpolate(lut_xfade_out, p2, 256.0f);
-    
-    float mix_A = x_1 * fade_out + x_2 * fade_in; // Main Mix
-    float mix_B = x_1 * fade_in + x_2 * fade_out; // Aux (Opposite) Mix
-
-    float effect_amount = fabs(algo);
-
-    // Calculate Fast Crossfade based on absolute amount
-    const float xfade_threshold = 0.05f;
-    float xfade_amount = 0.0f;
-    if (effect_amount < xfade_threshold) {
-      xfade_amount = effect_amount / xfade_threshold;
-    } else {
-      xfade_amount = 1.0f;
-    }
+    MixerFrame f = MixerComputeFrame(
+        *in_1++, *in_2++, xfade_interp.Next(), algo_interp.Next());
 
     float processed_A = 0.0f;
     float processed_B = 0.0f;
-    float out_A = 0.0f;
-    float out_B = 0.0f;
 
-    if (algo < 0.0f) {
-      // --- CCW: SRR + "JFET" Saturation ---
-      // SRR Bitcrusher
-      float aliased_A = Xmod<ALGORITHM_SIMPLE_BITCRUSHER>(mix_A, 0.0f, 0.0f, effect_amount);
-      float aliased_B = Xmod<ALGORITHM_SIMPLE_BITCRUSHER>(mix_B, 0.0f, 1.0f, effect_amount);
+    if (f.algo < 0.0f) {
+      // --- CCW: SRR + Saturation ---
+      float aliased_A = Xmod<ALGORITHM_SIMPLE_BITCRUSHER>(f.mix_A, 0.0f, 0.0f, f.effect_amount);
+      float aliased_B = Xmod<ALGORITHM_SIMPLE_BITCRUSHER>(f.mix_B, 0.0f, 1.0f, f.effect_amount);
 
-      // Saturation (harmonic mode dependent)
-      float drive = 1.0f + effect_amount * 2.0f;
-      if (harmonic_mode == 1) {
+      float drive = 1.0f + f.effect_amount * 2.0f;
+      if (quality_mode == 1) {
           // Even harmonics (tube) - asymmetric
           processed_A = stmlib::SoftLimit(aliased_A * drive + 0.2f);
           processed_B = stmlib::SoftLimit(aliased_B * drive + 0.2f);
-      } else if (harmonic_mode == 2) {
+      } else if (quality_mode == 2) {
           // Hard clip (transistor)
           float a = aliased_A * drive;
           float b = aliased_B * drive;
@@ -1378,7 +1214,7 @@ void Modulator::ProcessCrushMixer(ShortFrame* input, ShortFrame* output, size_t 
           if (b > 1.0f) b = 1.0f; else if (b < -1.0f) b = -1.0f;
           processed_A = a;
           processed_B = b;
-      } else if (harmonic_mode == 3) {
+      } else if (quality_mode == 3) {
           // Digital (quantized)
           float a = stmlib::SoftLimit(aliased_A * drive);
           float b = stmlib::SoftLimit(aliased_B * drive);
@@ -1391,123 +1227,33 @@ void Modulator::ProcessCrushMixer(ShortFrame* input, ShortFrame* output, size_t 
           processed_B = stmlib::SoftLimit(aliased_B * drive);
       }
     } else {
-      // --- CW: Comb Filter + Feedback (Test Equipment Resonance) ---
-      static float comb_feedback_l = 0.0f;
-      static float comb_feedback_r = 0.0f;
+      // --- CW: Chebyshev polynomial waveshaping ---
+      float degree_scale = 0.25f + quality_mode * 0.25f;
+      float cheby_param = f.effect_amount * degree_scale;
+      float comp_param = f.effect_amount;
+      processed_A = Xmod<ALGORITHM_COMPARATOR_CHEBYSCHEV>(f.mix_A, f.mix_B, comp_param, cheby_param);
+      float cheby_param_r = cheby_param * 1.03f;
+      if (cheby_param_r > 1.0f) cheby_param_r = 1.0f;
+      processed_B = Xmod<ALGORITHM_COMPARATOR_CHEBYSCHEV>(f.mix_B, f.mix_A, comp_param, cheby_param_r);
+    }
 
-      // Delay time: quadratic sweep from 1920 to 48 samples
-      float inv = (1.0f - effect_amount);
-      float delay_samples = 48.0f + (1920.0f - 48.0f) * inv * inv;
-
-      // Feedback ramps with effect amount
-      float feedback_amount = 0.6f + effect_amount * 0.32f;  // 0.6 to 0.92
-
-      // Write input + feedback to delay buffer
-      float write_l = mix_A + comb_feedback_l * feedback_amount;
-      float write_r = mix_B + comb_feedback_r * feedback_amount;
-
-      delay_buffer_[shared_write_pos_].l = Clip16(write_l * 32768.0f);
-      delay_buffer_[shared_write_pos_].r = Clip16(write_r * 32768.0f);
-
-      // Read from delay buffer
-      float read_pos = (float)shared_write_pos_ - delay_samples;
-      if (read_pos < 0.0f) read_pos += kSharedDelaySize;
-
-      MAKE_INTEGRAL_FRACTIONAL(read_pos);
-      int32_t i0 = read_pos_integral;
-      int32_t i1 = i0 + 1; if (i1 >= kSharedDelaySize) i1 = 0;
-      const float kToFloat = 1.0f / 32768.0f;
-
-      float d_l0 = delay_buffer_[i0].l * kToFloat;
-      float d_l1 = delay_buffer_[i1].l * kToFloat;
-      float delayed_l = d_l0 + (d_l1 - d_l0) * read_pos_fractional;
-
-      float d_r0 = delay_buffer_[i0].r * kToFloat;
-      float d_r1 = delay_buffer_[i1].r * kToFloat;
-      float delayed_r = d_r0 + (d_r1 - d_r0) * read_pos_fractional;
-
-      // Apply harmonic saturation in feedback path
-      if (harmonic_mode == 1) {
-          comb_feedback_l = stmlib::SoftLimit(delayed_l + 0.2f);
-          comb_feedback_r = stmlib::SoftLimit(delayed_r + 0.2f);
-      } else if (harmonic_mode == 2) {
-          float fl = delayed_l;
-          float fr = delayed_r;
-          if (fl > 1.0f) fl = 1.0f; else if (fl < -1.0f) fl = -1.0f;
-          if (fr > 1.0f) fr = 1.0f; else if (fr < -1.0f) fr = -1.0f;
-          comb_feedback_l = fl;
-          comb_feedback_r = fr;
-      } else if (harmonic_mode == 3) {
-          const float levels = 32.0f;
-          comb_feedback_l = floorf(stmlib::SoftLimit(delayed_l) * levels) / levels;
-          comb_feedback_r = floorf(stmlib::SoftLimit(delayed_r) * levels) / levels;
-      } else {
-          comb_feedback_l = stmlib::SoftLimit(delayed_l);
-          comb_feedback_r = stmlib::SoftLimit(delayed_r);
-      }
-
-      // Advance write pointer
-      shared_write_pos_++;
-      if (shared_write_pos_ >= kSharedDelaySize) shared_write_pos_ = 0;
-
-      // Output: mix of dry + comb resonance
-      float comb_mix = 0.5f + effect_amount * 0.3f;
-      processed_A = mix_A * (1.0f - comb_mix) + delayed_l * comb_mix;
-      processed_B = mix_B * (1.0f - comb_mix) + delayed_r * comb_mix;
-
-    } // End CW block
-
-    float fade_wet = Interpolate(lut_xfade_in, xfade_amount, 256.0f);
-    float fade_dry = Interpolate(lut_xfade_out, xfade_amount, 256.0f);
-
-    out_A = mix_A * fade_dry + processed_A * fade_wet;
-    out_B = mix_B * fade_dry + processed_B * fade_wet;
-    
-    output->l = Clip16(out_A * 32768.0f);
-    output->r = Clip16(out_B * 32768.0f);
-
-    output++;
+    MixerWriteOutput(output++, f, processed_A, processed_B);
   }
-  
-  previous_parameters_.raw_algorithm = parameters_.raw_algorithm;
-  previous_parameters_.modulation_parameter = parameters_.modulation_parameter;
+  MixerFinalize();
 }
 
 void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size_t size) {
-  float* in_1 = buffer_[0];
-  float* in_2 = buffer_[1];
-  float* aux = buffer_[2];
+  MixerPrepareInputs(input, size);
 
-  ParameterInterpolator effect_interpolator(
-      &previous_parameters_.raw_algorithm,
-      parameters_.raw_algorithm,
-      size);
-
-  ParameterInterpolator crossfade_interpolator(
+  ParameterInterpolator xfade_interp(
       &previous_parameters_.modulation_parameter,
-      parameters_.modulation_parameter,
-      size);
+      parameters_.modulation_parameter, size);
 
   // carrier_shape: 0=off(best), 1=green, 2=yellow, 3=red(most lofi)
   int quality = 3 - parameters_.carrier_shape;  // 3=best, 0=lofi
   float degradation = 1.0f - (quality / 3.0f);  // 0.0=pristine, 1.0=trashed
 
-  short* input_samples = &input->l;
-  for (int32_t i = 0; i < 2; ++i) {
-      amplifier_[i].Process(
-          parameters_.channel_drive[i],
-          1.0f,
-          input_samples + i,
-          buffer_[i],
-          aux,
-          2,
-          size);
-  }
-
-  float effect_target = effect_interpolator.Next(); 
-  float x_target = effect_target * 2.0f - 1.0f;
-  float effect_skewed_target = (x_target * x_target * x_target + 1.0f) * 0.5f;
-  float algo = (effect_skewed_target * 2.0f) - 1.0f;
+  float algo = SkewRawAlgorithm(parameters_.raw_algorithm);
   float effect_amount = fabs(algo);
   float effect_amount_sqrtf = sqrtf(effect_amount);
 
@@ -1517,9 +1263,16 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
     filter_[5].set_f<stmlib::FREQUENCY_FAST>(0.4f);
     // filter_[2].set_f<stmlib::FREQUENCY_FAST>(0.25f); // Hiss filter L // temporarly disabled
     filter_[3].set_f<stmlib::FREQUENCY_DIRTY>(0.25f); // Hiss filter R // try dirty filter instead of fast
-    float target_filter_cutoff = 0.05f + (1.0f - effect_amount_sqrtf) * (0.45f - degradation * 0.25f);
+    // Quality drives tape bandwidth, knob adds subtle darkening
+    float target_filter_cutoff = 0.05f + (1.0f - degradation) * 0.4f - effect_amount * 0.05f;
     tape_lp_l_.set_f<stmlib::FREQUENCY_FAST>(target_filter_cutoff);
     tape_lp_r_.set_f<stmlib::FREQUENCY_FAST>(target_filter_cutoff);
+
+    // Head bump: resonant bass boost that increases with wear
+    float head_bump_freq = (80.0f + degradation * 40.0f) * kSamplePeriod;  // 80-120Hz
+    float head_bump_q = 1.0f + degradation * 4.0f;  // q3=1(flat), q0=5(resonant)
+    lossy_bpf_l_.set_f_q<stmlib::FREQUENCY_FAST>(head_bump_freq, head_bump_q);
+    lossy_bpf_r_.set_f_q<stmlib::FREQUENCY_FAST>(head_bump_freq, head_bump_q);
   } else {
     // --- SET VHS FILTERS ---
     //tilt filters
@@ -1528,52 +1281,52 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
     filter_[2].set_f<stmlib::FREQUENCY_FAST>(0.02f); // R-LPF
     filter_[3].set_f<stmlib::FREQUENCY_FAST>(0.02f); // R-HPF
 
-    //snow filters
-    float age_mid   = smoothstep(0.3f, 0.8f, effect_amount);
-    float age_chewed = smoothstep(0.7f, 1.0f, effect_amount);
-    float low_cutoff  = 3000.0f + 2000.0f * age_mid;
-    float high_cutoff = 4000.0f + 4000.0f * age_chewed;
+    //snow filters (quality drives band positions)
+    float wear_mid = degradation * 0.7f;
+    float wear_heavy = degradation * 0.4f;
+    float low_cutoff  = 3000.0f + 2000.0f * wear_mid;
+    float high_cutoff = 4000.0f + 4000.0f * wear_heavy;
 
     // Try frequency dirty instead of fast
-    filter_[4].set_f<stmlib::FREQUENCY_DIRTY>(low_cutoff / 96000.0f);  // L-LPF
-    filter_[5].set_f<stmlib::FREQUENCY_DIRTY>(high_cutoff / 96000.0f); // L-HPF
-    filter_[6].set_f<stmlib::FREQUENCY_DIRTY>(low_cutoff / 96000.0f);  // R-LPF
-    filter_[7].set_f<stmlib::FREQUENCY_DIRTY>(high_cutoff / 96000.0f); // R-HPF
+    filter_[4].set_f<stmlib::FREQUENCY_DIRTY>(low_cutoff * kSamplePeriod);  // L-LPF
+    filter_[5].set_f<stmlib::FREQUENCY_DIRTY>(high_cutoff * kSamplePeriod); // L-HPF
+    filter_[6].set_f<stmlib::FREQUENCY_DIRTY>(low_cutoff * kSamplePeriod);  // R-LPF
+    filter_[7].set_f<stmlib::FREQUENCY_DIRTY>(high_cutoff * kSamplePeriod); // R-HPF
 
     // hiss filters
-    tape_lp_l_.set_f<stmlib::FREQUENCY_DIRTY>(0.05f); 
+    tape_lp_l_.set_f<stmlib::FREQUENCY_DIRTY>(0.05f);
     tape_lp_r_.set_f<stmlib::FREQUENCY_DIRTY>(0.25f);
+
+    // Pre-compute VHS dropout params (loop-invariant)
+    vhs_age_mid_ = smoothstep(0.3f, 0.8f, effect_amount);
+    vhs_age_chewed_ = smoothstep(0.7f, 1.0f, effect_amount);
+    float dropout_scale = 1.0f + degradation * 3.0f;
+    if (effect_amount < 0.1f) {
+        vhs_dropout_base_chance_ = 0.01f * dropout_scale;
+        vhs_dropout_max_length_ = 0.010f * dropout_scale;
+        vhs_dropout_gain_min_ = 0.6f;
+    } else if (effect_amount < 0.6f) {
+        vhs_dropout_base_chance_ = 0.05f * dropout_scale;
+        vhs_dropout_max_length_ = 0.035f * dropout_scale;
+        vhs_dropout_gain_min_ = 0.4f - degradation * 0.2f;
+    } else {
+        vhs_dropout_base_chance_ = 0.2f * dropout_scale;
+        vhs_dropout_max_length_ = 0.070f * dropout_scale;
+        vhs_dropout_gain_min_ = 0.2f - degradation * 0.15f;
+    }
   }
 
+  float* in_1 = buffer_[0];
+  float* in_2 = buffer_[1];
+
   while (size--) {
-    float p2 = crossfade_interpolator.Next(); // Crossfader
-    // float p1_raw =  effect_interpolator.Next(); // Effect Knob
-    // float x = p1_raw * 2.0f - 1.0f;
-    // float p1_skewed = (x * x * x + 1.0f) * 0.5f;
-    // float algo = (p1_skewed * 2.0f) - 1.0f;
-
-    float x_1 = *in_1++;
-    float x_2 = *in_2++;
-
-    float fade_in = Interpolate(lut_xfade_in, p2, 256.0f);
-    float fade_out = Interpolate(lut_xfade_out, p2, 256.0f);
-
-    float mix_A = x_1 * fade_out + x_2 * fade_in; // Main Mix
-    float mix_B = x_1 * fade_in + x_2 * fade_out; // Aux (Opposite) Mix
-    
-    const float xfade_threshold = 0.05f;
-    float xfade_amount = 0.0f;
-    if (effect_amount < xfade_threshold) {
-      xfade_amount = effect_amount / xfade_threshold;
-    } else {
-      xfade_amount = 1.0f;
-    }
+    MixerFrame f = MixerComputeFrame(
+        *in_1++, *in_2++, xfade_interp.Next(), algo);
+    float mix_A = f.mix_A;
+    float mix_B = f.mix_B;
 
     float processed_A = 0.0f;
     float processed_B = 0.0f;
-
-    float out_A = 0.0f;
-    float out_B = 0.0f;
 
     // Hiss noise generator for both modes
     static uint32_t hiss_rng_state_ = 0;
@@ -1582,7 +1335,7 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
     if (algo < 0.0f) {
       // --- CCW: Cassette Emulation ---
       // static float random_drift_lfo_phase_ = 0.0f;
-      int random_drift_counter_ = 0;
+      static int random_drift_counter_ = 0;
 
       static float flutter_lfo_phase = 0.0f;
       static float wow_lfo_phase = 0.0f;
@@ -1591,9 +1344,9 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       static float hiss_envelope_ = 0.0f;
       static float allpass_z1_ = 0.0f;
       static float mangle_read_pos_f = 0.0f;
+      static float smoothed_read_speed = 1.0f;
 
       const float mangle_threshold = 0.86f;
-      const float kSafeDistance = 0.5f;
 
       // --- WOW & FLUTTER MODULATION ---
 
@@ -1609,10 +1362,10 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       float flutter_freq = flutter_min + effect_amount * (flutter_max - flutter_min);
 
       // 2. Update LFO phases (fast wrap)
-      wow_lfo_phase += wow_freq / 96000.0f;
+      wow_lfo_phase += wow_freq * kSamplePeriod;
       if (wow_lfo_phase >= 1.0f) wow_lfo_phase -= 1.0f;
 
-      flutter_lfo_phase += flutter_freq / 96000.0f;
+      flutter_lfo_phase += flutter_freq * kSamplePeriod;
       if (flutter_lfo_phase >= 1.0f) flutter_lfo_phase -= 1.0f;
 
       // 4. Determine flutter scaling (fade in)
@@ -1632,8 +1385,14 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       float wow_next = lut_sin[(wow_i + 1) & (lut_size - 1)];
       float wow_mod = wow_l + (wow_next - wow_l) * wow_frac;
 
+      // 2nd harmonic for mechanical capstan lurch (worn tape wobbles asymmetrically)
+      int wow_2nd_i = (wow_i * 2) & (lut_size - 1);
+      wow_mod += lut_sin[wow_2nd_i] * degradation * 0.3f;
+
       int wow_i_r = (wow_i + (lut_size >> 3)) & (lut_size - 1);
       float wow_mod_r = lut_sin[wow_i_r];
+      int wow_2nd_i_r = (wow_i_r * 2) & (lut_size - 1);
+      wow_mod_r += lut_sin[wow_2nd_i_r] * degradation * 0.3f;
 
       // 6. Lookup flutter (stereo offset +1/4 cycle)
       float flutter_index = flutter_lfo_phase * lut_size;
@@ -1654,33 +1413,54 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
 
       // 8. Compute final delay offsets
       const float kFixedTapeDelay = 1.0f;
-      float delay_offset_l = total_mod_l * 3.0f;
-      float delay_offset_r = total_mod_r * 3.0f;
+      float depth_multiplier = 3.0f + effect_amount * 4.0f;  // 3.0 at knob=0, ~6.4 at knob=0.86
+      float delay_offset_l = total_mod_l * depth_multiplier;
+      float delay_offset_r = total_mod_r * depth_multiplier;
 
       float base_read_pos = shared_write_pos_ - kFixedTapeDelay;
 
       if (effect_amount >= mangle_threshold) {
           // --- "TAPE MANGLE" (PITCH SHIFT) ---
           float mangle_amount = (effect_amount - mangle_threshold) / (1.0f - mangle_threshold);
-          float read_speed = (mangle_amount < 0.8f) ? 0.5f : 0.25f;
 
-          mangle_read_pos_f += read_speed;
-          //replace fmodf with manual wrap
+          // Hard step: half-speed, then quarter-speed at 80%
+          float target_speed = (mangle_amount < 0.8f) ? 0.5f : 0.25f;
+
+          // Smooth the speed (~10ms ramp) — prevents click on mangle entry
+          ONE_POLE(smoothed_read_speed, target_speed, 0.005f);
+
+          mangle_read_pos_f += smoothed_read_speed;
           if (mangle_read_pos_f >= (float)kSharedDelaySize)
               mangle_read_pos_f -= (float)kSharedDelaySize;
 
-          // mangle_read_pos_f = fmodf(mangle_read_pos_f, (float)kSharedDelaySize);
+          // Proper circular distance (how far read is behind write)
+          float distance = (float)shared_write_pos_ - mangle_read_pos_f;
+          if (distance < 0.0f) distance += (float)kSharedDelaySize;
 
-          //replace distance calculation with manual wrap
-          float distance = (float)shared_write_pos_ - mangle_read_pos_f + (float)kSharedDelaySize;
-          if (distance < kSafeDistance)
-              mangle_read_pos_f = (float)shared_write_pos_ - kSafeDistance;
+          // Soft pull-forward when read gets too close to write
+          const float kSafeZone = 128.0f;
+          const float kTargetDistance = 512.0f;
+          if (distance < kSafeZone || distance > (float)kSharedDelaySize - kSafeZone) {
+              // Pull toward safe target — brief pitch-up instead of click
+              float target_pos = (float)shared_write_pos_ - kTargetDistance;
+              if (target_pos < 0.0f) target_pos += (float)kSharedDelaySize;
+
+              float diff = target_pos - mangle_read_pos_f;
+              if (diff > (float)kSharedDelaySize * 0.5f) diff -= (float)kSharedDelaySize;
+              if (diff < -(float)kSharedDelaySize * 0.5f) diff += (float)kSharedDelaySize;
+              mangle_read_pos_f += diff * 0.02f;
+
+              if (mangle_read_pos_f < 0.0f) mangle_read_pos_f += (float)kSharedDelaySize;
+              if (mangle_read_pos_f >= (float)kSharedDelaySize) mangle_read_pos_f -= (float)kSharedDelaySize;
+          }
 
           base_read_pos = mangle_read_pos_f;
       } else {
-          // --- ORIGINAL WOW/FLUTTER (effect_amount < 0.88) ---
+          // --- ORIGINAL WOW/FLUTTER ---
           base_read_pos = shared_write_pos_ - kFixedTapeDelay;
           mangle_read_pos_f = base_read_pos;
+          // Ramp speed back toward 1.0 for clean re-entry
+          ONE_POLE(smoothed_read_speed, 1.0f, 0.01f);
       }
 
       float read_pos_f_L = base_read_pos + delay_offset_l;
@@ -1712,9 +1492,10 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       {
           int32_t index_integral = read_pos_f_L_integral;
           float t = read_pos_f_L_fractional;
-          const float kToFloat = 1.0f / 32768.0f;
+
+          int32_t i1_l = index_integral + 1; if (i1_l >= kSharedDelaySize) i1_l = 0;
           float x0 = static_cast<float>(delay_buffer_[index_integral].l) * kToFloat;
-          float x1 = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].l) * kToFloat;
+          float x1 = static_cast<float>(delay_buffer_[i1_l].l) * kToFloat;
           delayed_l = x0 + (x1 - x0) * t;
       }
 
@@ -1730,15 +1511,15 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       {
           int32_t index_integral = read_pos_f_R_integral;
           float t = read_pos_f_R_fractional;
-          const float kToFloat = 1.0f / 32768.0f;
+          int32_t i1_r = index_integral + 1; if (i1_r >= kSharedDelaySize) i1_r = 0;
           float x0 = static_cast<float>(delay_buffer_[index_integral].r) * kToFloat;
-          float x1 = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].r) * kToFloat;
+          float x1 = static_cast<float>(delay_buffer_[i1_r].r) * kToFloat;
           delayed_r = x0 + (x1 - x0) * t;
       }
 
       // --- FAKE STEREO ---
       {
-          float coeff = 0.4f + slow_random_drift * 1.0f; 
+          float coeff = 0.4f + slow_random_drift * 1.0f;
           float x_n = delayed_r;
           float w = x_n + coeff * allpass_z1_;
           float y_n = -coeff * w + allpass_z1_;
@@ -1751,12 +1532,29 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       float input_level = (fabs(delayed_l) + fabs(delayed_r)) * 0.5f;
       ONE_POLE(hiss_envelope_, input_level, 0.0002f); 
 
-      // --- Saturation ---
-      float shaped = effect_amount * effect_amount;
-      float drive = 1.0f + shaped * (4.0f + degradation * 4.0f);
-      float offset = shaped * (0.15f + degradation * 0.15f);
-      float sat_l = stmlib::SoftLimit((delayed_l * drive) + offset);
-      float sat_r = stmlib::SoftLimit((delayed_r * drive) + offset);
+      // --- Saturation (quality drives it, knob adds subtle extra) ---
+      float drive = 1.0f + degradation * 4.0f + effect_amount * 1.0f;
+      float offset = degradation * 0.2f + effect_amount * 0.05f;
+      // Cubic soft-clip (division-free, saves ~24 cyc vs SoftLimit)
+      float s_l = (delayed_l * drive) + offset;
+      if (s_l > 1.0f) s_l = 1.0f;
+      else if (s_l < -1.0f) s_l = -1.0f;
+      else s_l = s_l * (1.5f - 0.5f * s_l * s_l);
+      float sat_l = s_l;
+
+      float s_r = (delayed_r * drive) + offset;
+      if (s_r > 1.0f) s_r = 1.0f;
+      else if (s_r < -1.0f) s_r = -1.0f;
+      else s_r = s_r * (1.5f - 0.5f * s_r * s_r);
+      float sat_r = s_r;
+
+      // --- Head Bump (worn playback head resonance, mono — saves 1 SVF) ---
+      {
+          float head_bump_amount = degradation * 0.3f;  // 0 at q3, 0.3 at q0
+          float bump = lossy_bpf_l_.Process<stmlib::FILTER_MODE_BAND_PASS>(sat_l);
+          sat_l += bump * head_bump_amount;
+          sat_r += bump * head_bump_amount;
+      }
 
       // --- De-emphasis ---
       sat_l = filter_[4].Process<stmlib::FILTER_MODE_LOW_PASS>(sat_l);
@@ -1766,13 +1564,12 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       float filtered_l = filter_[6].Process<stmlib::FILTER_MODE_LOW_PASS>(sat_l);
       float filtered_r = filter_[7].Process<stmlib::FILTER_MODE_LOW_PASS>(sat_r);
 
-      // --- Hiss (Dynamic) ---
-      const float hiss_threshold = 0.65f;
-      float hiss_amount = (effect_amount > hiss_threshold) ? hiss_threshold : effect_amount;
-      float hiss_scale = 1.0f + degradation * 3.0f;  // 1x to 4x
-      float base_hiss_level = hiss_amount * 0.03f * hiss_scale;
-      float dynamic_hiss_level = hiss_envelope_ * 2.0f * hiss_amount * 0.4f * hiss_scale;
-      float hiss_level = (base_hiss_level + dynamic_hiss_level);
+      // --- Hiss (quality drives level, knob adds subtle modulation) ---
+      float hiss_degradation = degradation * degradation;  // q0=1.0, q1=0.44, q2=0.11, q3=0
+      float hiss_base = hiss_degradation * 0.12f;  // constant bias noise floor
+      float hiss_dynamic = hiss_envelope_ * hiss_degradation * 0.4f;
+      float hiss_knob_mod = effect_amount * 0.02f;
+      float hiss_level = hiss_base + hiss_dynamic + hiss_knob_mod;
 
       float hiss_raw_l = static_cast<float>(hiss_rng_state_) / 4294967296.0f;
       float hiss_l = (hiss_raw_l - 0.5f) * hiss_level;
@@ -1781,37 +1578,24 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       // float hiss_filtered_r = filter_[2].Process<stmlib::FILTER_MODE_HIGH_PASS>(hiss_r); 
 
       processed_A = filtered_l + hiss_filtered_l;
-      processed_B = filtered_r - hiss_filtered_l; // Mono hiss for cpu? Now we invert it for cheap fake stereo
+      processed_B = filtered_r - hiss_filtered_l;
     } else {
       // --- CW: VHS Emulation ---
-
-      //same as above can we optimize by moving out of the loop?
-      float age_mid   = smoothstep(0.3f, 0.8f, effect_amount);
-      float age_chewed = smoothstep(0.7f, 1.0f, effect_amount);
-      float dropout_base_chance;
-      float dropout_max_length;
-      float dropout_gain_min;
-
-      float dropout_scale = 1.0f + degradation * 3.0f;  // 1x to 4x
-
-      if (effect_amount < 0.1f) { // Fresh
-          dropout_base_chance = 0.01f * dropout_scale;
-          dropout_max_length  = 0.010f * dropout_scale;
-          dropout_gain_min    = 0.6f;
-      } else if (effect_amount < 0.6f) { // Mid-Age
-          dropout_base_chance = 0.05f * dropout_scale;
-          dropout_max_length  = 0.035f * dropout_scale;
-          dropout_gain_min    = 0.4f - degradation * 0.2f;
-      } else { // Chewed
-          dropout_base_chance = 0.2f * dropout_scale;
-          dropout_max_length  = 0.070f * dropout_scale;
-          dropout_gain_min    = 0.2f - degradation * 0.15f;
-      }
+      // dropout params pre-computed before the loop
+      float age_chewed = vhs_age_chewed_;
+      float dropout_base_chance = vhs_dropout_base_chance_;
+      float dropout_max_length = vhs_dropout_max_length_;
+      float dropout_gain_min = vhs_dropout_gain_min_;
       
       // --- State Variables ---
       static float dropout_check_timer = 0.1f;
       static float dropout_duration_timer = 0.0f;
+      static float dropout_envelope = 1.0f;
+      static float tracking_lfo_phase = 0.0f;
       static float hum_lfo_phase_ = 0.0f;
+      static float prev_hum_phase = 0.0f;
+      static float click_envelope = 0.0f;
+      static float tilt_envelope = 0.0f;
       
       // --- Noise Signal (Band-passed) ---
       float input_level = (fabs(mix_A) + fabs(mix_B)) * 0.5f;
@@ -1832,36 +1616,52 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       float low_noise_R  = filter_[6].Process<stmlib::FILTER_MODE_LOW_PASS>(noise_mid);
       float high_noise_R = filter_[7].Process<stmlib::FILTER_MODE_HIGH_PASS>(noise_mid);
 
-      // VHS-style mixed noise
+      // VHS-style mixed noise (quality drives snow character)
+      float wear_mid = degradation * 0.7f;
+      float wear_heavy = degradation * 0.4f;
+      float stereo_mod = breathing * 0.15f;  // dynamic stereo: spreads when input is quiet
+
       float vhs_snow_L =
-      low_noise_L  * (0.2f + age_mid * 0.3f)
-      + noise_mid    * (0.6f + age_chewed * 0.3f)
-      + high_noise_L * (0.2f * age_chewed);
+      low_noise_L  * (0.2f + wear_mid * 0.3f + stereo_mod)
+      + noise_mid    * (0.6f + wear_heavy * 0.3f)
+      + high_noise_L * (0.2f * wear_heavy - stereo_mod);
 
       float vhs_snow_R =
-      low_noise_R  * (0.2f + age_mid * 0.3f)
-      + noise_mid    * (0.6f + age_chewed * 0.3f)
-      + high_noise_R * (0.2f * age_chewed);
+      low_noise_R  * (0.2f + wear_mid * 0.3f - stereo_mod)
+      + noise_mid    * (0.6f + wear_heavy * 0.3f)
+      + high_noise_R * (0.2f * wear_heavy + stereo_mod);
 
-      // --- Noise Amount / Leveling ---
-      float noise_scale = 1.0f + degradation * 2.0f;  // 1x to 3x
-      float noise_level = (0.02f + age_mid * 0.05f + age_chewed * 0.15f) * noise_scale;
-      float snow_threshold = 0.95f - degradation * 0.15f;  // 0.95 to 0.80
-      float snow_boost  = (effect_amount > snow_threshold) ? (effect_amount - snow_threshold) * 8.0f : 0.0f;
-      float noise_amount = (noise_level + snow_boost) * (0.8f + breathing * 1.2f);  // breathing mod
+      // --- Noise Amount (quality drives noise floor, knob adds subtle extra) ---
+      float noise_level = degradation * 0.15f + effect_amount * 0.03f;
+      float noise_amount = noise_level * (0.8f + breathing * 1.2f);
 
-      // --- Dropout Logic (gets chaotic at the end) ---
-      float dropout_gain = 1.0f;
-      float dropout_tilt_mod = 0.0f; 
+      // --- Tracking Instability (far end of knob, >85%) ---
+      float tracking_instability = 0.0f;
+      if (effect_amount > 0.85f) {
+          float tracking_amount = (effect_amount - 0.85f) / 0.15f;
+          tracking_amount *= tracking_amount;  // quadratic ramp — gentle onset
+
+          tracking_lfo_phase += (8.0f + effect_amount * 12.0f) * kSamplePeriod;
+          if (tracking_lfo_phase >= 1.0f) tracking_lfo_phase -= 1.0f;
+          float tracking_lfo = Interpolate(lut_sin, tracking_lfo_phase, 1024.0f);
+
+          // Periodic tracking glitch: signal disruption when LFO > threshold
+          tracking_instability = tracking_amount * (tracking_lfo > 0.3f ? 1.0f : 0.0f);
+      }
+
+      // --- Dropout Logic ---
+      float dropout_target = 1.0f;
 
       if (dropout_duration_timer > 0.0f) {
-        // --- We ARE currently dropping out ---
-        dropout_duration_timer -= 1.0f / 96000.0f;
-        dropout_gain = dropout_gain_min;
-        dropout_tilt_mod = 1.0f;
+        // Currently dropping out
+        dropout_duration_timer -= kSamplePeriod;
+        dropout_target = dropout_gain_min;
+      } else if (tracking_instability > 0.5f) {
+        // Tracking loss — partial signal drop with noise
+        dropout_target = 0.3f + (1.0f - tracking_instability) * 0.4f;
       } else {
-        // --- We are NOT dropping out, check if we should ---
-        dropout_check_timer -= 1.0f / 96000.0f;
+        // Check if we should start a new dropout
+        dropout_check_timer -= kSamplePeriod;
         if (dropout_check_timer <= 0.0f) {
           if (Random::GetFloat() < dropout_base_chance) {
               dropout_duration_timer = 0.001f + Random::GetFloat() * dropout_max_length;
@@ -1870,12 +1670,20 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
         }
       }
 
-      // Apply dropout gain
-      float signal_A = mix_A * dropout_gain;
-      float signal_B = mix_B * dropout_gain;
+      // Asymmetric envelope: fast attack (~2ms), slower release (~5ms)
+      float dropout_coeff = (dropout_target < dropout_envelope) ? 0.005f : 0.002f;
+      ONE_POLE(dropout_envelope, dropout_target, dropout_coeff);
 
-      // --- Tape Saturation Stage ---
-      float drive = 1.0f + effect_amount * (2.0f + degradation * 2.0f);
+      // Noise rises as signal falls (AGC simulation)
+      float signal_loss = 1.0f - dropout_envelope;
+      float dropout_noise = noise_mid * signal_loss * 0.05f;
+
+      // Apply dropout with noise fill
+      float signal_A = mix_A * dropout_envelope + dropout_noise;
+      float signal_B = mix_B * dropout_envelope + dropout_noise;
+
+      // --- Tape Saturation (quality drives it, knob adds subtle extra) ---
+      float drive = 1.0f + degradation * 3.0f + effect_amount * 0.5f;
       signal_A = stmlib::SoftLimit(signal_A * drive);
       signal_B = stmlib::SoftLimit(signal_B * drive);
 
@@ -1885,11 +1693,13 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       float tilt_lpf_B = filter_[2].Process<stmlib::FILTER_MODE_LOW_PASS>(signal_B);
       float tilt_hpf_B = filter_[3].Process<stmlib::FILTER_MODE_HIGH_PASS>(signal_B);
 
-      float tilt_mix = 0.5f + (effect_amount * 0.5f);
-
-      if (dropout_tilt_mod > 0.5f) {
-        tilt_mix = 1.0f; // Force dark
-      }
+      // Quality drives tilt, knob adds subtle extra
+      // Dropout darkens progressively; highs recover slower than lows (head re-seating)
+      float tilt_coeff = (signal_loss > tilt_envelope) ? 0.008f : 0.001f;
+      ONE_POLE(tilt_envelope, signal_loss, tilt_coeff);
+      float dropout_tilt_mod = tilt_envelope * 0.5f;
+      float tilt_mix = 0.5f + degradation * 0.4f + effect_amount * 0.1f + dropout_tilt_mod;
+      if (tilt_mix > 1.0f) tilt_mix = 1.0f;
 
       float filtered_A = tilt_hpf_A * (1.0f - tilt_mix) + tilt_lpf_A * tilt_mix;
       float filtered_B = tilt_hpf_B * (1.0f - tilt_mix) + tilt_lpf_B * tilt_mix;
@@ -1900,227 +1710,203 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       float target = age_chewed * (random_val - 0.5f) * 0.02f;
       ONE_POLE(hum_instability, target, 0.0005f);
 
-      float hum_freq = 60.0f + hum_instability; 
-      hum_lfo_phase_ += hum_freq / 96000.0f;
+      float hum_freq = 60.0f + hum_instability;
+      hum_lfo_phase_ += hum_freq * kSamplePeriod;
       if (hum_lfo_phase_ >= 1.0f) hum_lfo_phase_ -= 1.0f;
-      float hum = Interpolate(lut_sin, hum_lfo_phase_, 1024.0f);
-      hum = hum * (1.0f + 0.25f * hum);  // adds a bit of 2nd harmonic distortion
-      float hum_amount = effect_amount * (0.03f + degradation * 0.04f);
-      
-      // --- Add Noise & Hum ---
-      processed_A = filtered_A + (vhs_snow_L * noise_amount * 0.04f) + (hum * hum_amount);
-      processed_B = filtered_B + (vhs_snow_R * noise_amount * 0.04f) + (hum * hum_amount);
+      float hum_l = Interpolate(lut_sin, hum_lfo_phase_, 1024.0f);
+      hum_l = hum_l * (1.0f + 0.25f * hum_l);
+
+      // 90° phase-shifted hum for R — rotates in stereo field
+      float hum_phase_r = hum_lfo_phase_ + 0.25f;
+      if (hum_phase_r >= 1.0f) hum_phase_r -= 1.0f;
+      float hum_r = Interpolate(lut_sin, hum_phase_r, 1024.0f);
+      hum_r = hum_r * (1.0f + 0.25f * hum_r);
+
+      // Quality drives hum level, knob adds subtle extra
+      float hum_amount = degradation * 0.05f + effect_amount * 0.01f;
+
+      // --- Head-Switch Click (drum head switches every 1/60s) ---
+      // Detect hum phase wrap = head switch moment
+      if (hum_lfo_phase_ < prev_hum_phase) {
+          click_envelope = 1.0f;
+      }
+      prev_hum_phase = hum_lfo_phase_;
+      click_envelope *= 0.92f;  // ~0.5ms decay
+      float head_click = noise_mid * click_envelope * degradation * 0.15f;
+
+      // --- Add Noise, Hum & Click ---
+      processed_A = filtered_A + (vhs_snow_L * noise_amount * 0.04f) + (hum_l * hum_amount) + head_click;
+      processed_B = filtered_B + (vhs_snow_R * noise_amount * 0.04f) + (hum_r * hum_amount) + head_click;
     }
-
-    float fade_wet = Interpolate(lut_xfade_in, xfade_amount, 256.0f);
-    float fade_dry = Interpolate(lut_xfade_out, xfade_amount, 256.0f);
-
-    out_A = mix_A * fade_dry + processed_A * fade_wet;
-    out_B = mix_B * fade_dry + processed_B * fade_wet;
 
     delay_buffer_[shared_write_pos_].l = Clip16(mix_A * 32768.0f);
     delay_buffer_[shared_write_pos_].r = Clip16(mix_B * 32768.0f);
-    shared_write_pos_ = (shared_write_pos_ + 1) % kSharedDelaySize;
+    if (++shared_write_pos_ >= kSharedDelaySize) shared_write_pos_ = 0;
 
-    output->l = Clip16(out_A * 32768.0f);
-    output->r = Clip16(out_B * 32768.0f);
-
-    output++;
+    MixerWriteOutput(output++, f, processed_A, processed_B);
   }
-
-  previous_parameters_.raw_algorithm = parameters_.raw_algorithm;
-  previous_parameters_.modulation_parameter = parameters_.modulation_parameter;
+  MixerFinalize();
 }
 
 void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t size) {
-    float* in_1 = buffer_[0];
-    float* in_2 = buffer_[1];
-    float* aux = buffer_[2];
+  MixerPrepareInputs(input, size);
 
-
-  ParameterInterpolator effect_interpolator(
-       &previous_parameters_.raw_algorithm,
-       parameters_.raw_algorithm,
-       size);
-
-  ParameterInterpolator crossfade_interpolator(
-       &previous_parameters_.modulation_parameter,
-       parameters_.modulation_parameter,
-       size);
+  float algo_start = SkewRawAlgorithm(previous_parameters_.raw_algorithm);
+  float algo_end = SkewRawAlgorithm(parameters_.raw_algorithm);
+  ParameterInterpolator algo_interp(&algo_start, algo_end, size);
+  ParameterInterpolator xfade_interp(
+      &previous_parameters_.modulation_parameter,
+      parameters_.modulation_parameter, size);
 
     // carrier_shape: 0=off(best), 1=green, 2=yellow, 3=red(most lofi)
     int quality = 3 - parameters_.carrier_shape;  // 3=best, 0=lofi
+    const float degradation = 1.0f - (quality / 3.0f);  // hoist: 0=q3, 1.0=q0
+    const int write_decimation = (quality == 0) ? 4 : (quality == 1) ? 3 : (quality == 2) ? 2 : 1;
+    const float lp_coeffs[] = { 0.12f, 0.25f, 0.5f, 0.8f };
+    const float fb_lp_coeff = lp_coeffs[quality];
+    const float max_birdie_resonance = degradation * 35.0f;
+    const float birdie_mix_scale = degradation * 0.65f;
+    const int decimation_factor = (quality == 0) ? 8 : (quality == 1) ? 5 : (quality == 2) ? 3 : 1;
+    const float bit_scales[] = { 256.0f, 1024.0f, 4096.0f, 1.0f };
+    const float bit_scale = bit_scales[quality];
+    const float bit_scale_inv = 1.0f / bit_scale;
+    const bool do_bitcrush = (quality < 3);
 
-    short* input_samples = &input->l;
-    for (int32_t i = 0; i < 2; ++i) {
-      amplifier_[i].Process(
-          parameters_.channel_drive[i],
-          1.0f,
-          input_samples + i,
-          buffer_[i],
-          aux,
-          2,
-          size);
-    }
+  float* in_1 = buffer_[0];
+  float* in_2 = buffer_[1];
 
   while (size--) {
     bool write_to_buffer = true;
 
-    float effect_target = effect_interpolator.Next(); // Effect Knob
-    float x_target = effect_target * 2.0f - 1.0f;
-    float effect_skewed_target = (x_target * x_target * x_target + 1.0f) * 0.5f;
-    float algo = (effect_skewed_target * 2.0f) - 1.0f;
-    float effect_amount = fabs(algo);
+    MixerFrame f = MixerComputeFrame(
+        *in_1++, *in_2++, xfade_interp.Next(), algo_interp.Next());
+    float mix_A = f.mix_A;
+    float mix_B = f.mix_B;
+    float effect_amount = f.effect_amount;
 
-    // --- Write clock: lofi writes every other sample ---
+    // --- Write clock: all quality levels get sample rate reduction ---
     static int write_counter = 0;
-    write_counter++;
-    bool write_clock = (quality == 0) ? (write_counter & 1) : true;
-
-    float crossfade = crossfade_interpolator.Next(); // Crossfader
-
-    float x_1 = *in_1++;
-    float x_2 = *in_2++;
-
-    float fade_in = Interpolate(lut_xfade_in, crossfade, 256.0f);
-    float fade_out = Interpolate(lut_xfade_out, crossfade, 256.0f);
-
-    float mix_A = x_1 * fade_out + x_2 * fade_in; // Main Mix
-    float mix_B = x_1 * fade_in + x_2 * fade_out; // Aux (Opposite) Mix
-
-    const float xfade_threshold = 0.05f;
-    float xfade_amount = 0.0f;
-    if (effect_amount < xfade_threshold) {
-      xfade_amount = effect_amount / xfade_threshold;
-    } else {
-      xfade_amount = 1.0f;
-    }
+    bool write_clock = (++write_counter >= write_decimation);
+    if (write_clock) write_counter = 0;
 
     float processed_A = 0.0f;
     float processed_B = 0.0f;
-    float out_A = 0.0f;
-    float out_B = 0.0f;
 
-      if (algo < 0.0f) {
-        // --- CCW: Granular Smear / Chorus ---
-        static float feedback_l = 0.0f, feedback_r = 0.0f;
-        static float smear_lfo_phase_ = 0.0f;
-        static float smear_lfo_target_val_ = 0.5f;
-        static float smear_lfo_current_val_ = 0.5f;
-        static float chorus_lfo_phase_ = 0.0f;
-        static float pitch_offset_l_ = 0.0f;
-        static float pitch_offset_r_ = 0.0f;
+      if (f.algo < 0.0f) {
+        // --- CCW: Corrupt (MP3/codec breaking) ---
+        static float corrupt_read_pos = 0.0f;
+        static float corrupt_read_speed = 1.0f;
+        static float frozen_l = 0.0f, frozen_r = 0.0f;
+        static float freeze_timer = 0.0f;
+        static bool frame_frozen = false;
+        static float resync_timer = 0.0f;
+        static uint32_t corrupt_rng = 0x12345678;
 
-        // Calculate Target Delay
-        float base_delay_samples = 2880.0f + effect_amount * 8640.0f;
+        // LCG noise for corruption
+        corrupt_rng = corrupt_rng * 1664525u + 1013904223u;
 
-        // Update Smear LFO (per-sample)
-        smear_lfo_phase_ += 0.2f / 96000.0f;
-        if (smear_lfo_phase_ >= 1.0f) {
-            smear_lfo_phase_ -= 1.0f;
-            smear_lfo_target_val_ = Random::GetFloat();
-        }
-        ONE_POLE(smear_lfo_current_val_, smear_lfo_target_val_, 0.0005f);
-        float smear_mod = (smear_lfo_current_val_ - 0.5f) * 2.0f;
-
-        // Update Chorus LFO (per-sample)
-        chorus_lfo_phase_ += 0.3f / 96000.0f;
-        if (chorus_lfo_phase_ >= 1.0f) chorus_lfo_phase_ -= 1.0f;
-        float chorus_mod = Interpolate(lut_sin, chorus_lfo_phase_, 1024.0f);
-        // Calculate Final Read Positions
-        float smear_mod_amount = effect_amount * 1920.0f; 
-        float stereo_offset = (100.0f + chorus_mod * 100.0f) * effect_amount;
-        
-        float delay_l_samples = base_delay_samples - stereo_offset + (smear_mod * smear_mod_amount);
-        float delay_r_samples = base_delay_samples + stereo_offset - (smear_mod * smear_mod_amount);
-        
-
-        //crackle fix?
-        const float min_delay = 32.0f;
-        delay_l_samples = fmaxf(delay_l_samples, min_delay);
-        delay_r_samples = fmaxf(delay_r_samples, min_delay);
-
-        const float pitch_threshold = 0.8f;
-        float pitch_shift_rate = 0.0f;
-
-        if (effect_amount > pitch_threshold) {
-            float pitch_ramp = (effect_amount - pitch_threshold) / (1.0f - pitch_threshold);
-            pitch_shift_rate = 0.498f * pitch_ramp;
-        } else {
-            // Reset offsets when not pitch-shifting
-            pitch_offset_l_ = 0.0f;
-            pitch_offset_r_ = 0.0f;
-        }
-
-        pitch_offset_l_ += pitch_shift_rate;
-        pitch_offset_r_ += pitch_shift_rate;
         const float buffer_size_f = (float)kSharedDelaySize;
 
-        if (pitch_offset_l_ >= buffer_size_f) pitch_offset_l_ -= buffer_size_f;
-        else if (pitch_offset_l_ < 0.0f) pitch_offset_l_ += buffer_size_f;
+        // --- Sample rate mismatch: read at wrong speed ---
+        // q3: barely off (0.98-1.02), q0: very wrong (0.7-1.3)
+        const float speed_ranges[] = { 0.30f, 0.20f, 0.10f, 0.02f };
+        float speed_range = speed_ranges[quality];
 
-        if (pitch_offset_r_ >= buffer_size_f) pitch_offset_r_ -= buffer_size_f;
-        else if (pitch_offset_r_ < 0.0f) pitch_offset_r_ += buffer_size_f;
-        
-        // Apply the pitch offset to the read position
-        float read_pos_l_to_use = (float)shared_write_pos_ - delay_l_samples + pitch_offset_l_;
-        float read_pos_r_to_use = (float)shared_write_pos_ - delay_r_samples + pitch_offset_r_;
-        
+        // Periodically resync and pick a new wrong speed
+        resync_timer -= kSamplePeriod;
+        if (resync_timer <= 0.0f) {
+            // Resync: jump read pos back to near write pos
+            float resync_strength = effect_amount * 0.8f;
+            float target = (float)shared_write_pos_ - 96.0f;  // 1ms behind
+            if (target < 0.0f) target += buffer_size_f;
+            corrupt_read_pos += (target - corrupt_read_pos) * resync_strength;
+            if (corrupt_read_pos < 0.0f) corrupt_read_pos += buffer_size_f;
+            if (corrupt_read_pos >= buffer_size_f) corrupt_read_pos -= buffer_size_f;
 
-        // --- Read audio (L & R Channels) ---
-        float delayed_l, delayed_r;
+            // Pick new wrong speed
+            float rnd = (float)(corrupt_rng & 0x7fffffff) / 2147483647.0f;
+            corrupt_read_speed = 1.0f + (rnd - 0.5f) * 2.0f * speed_range * effect_amount;
 
-        // Wrap read positions into [0, kSharedDelaySize)
-        float rp_l = read_pos_l_to_use;
-        if (rp_l >= kSharedDelaySize) rp_l -= kSharedDelaySize;
-        else if (rp_l < 0.0f) rp_l += kSharedDelaySize;
-
-        float rp_r = read_pos_r_to_use;
-        if (rp_r >= kSharedDelaySize) rp_r -= kSharedDelaySize;
-        else if (rp_r < 0.0f) rp_r += kSharedDelaySize;
-
-        const float kToFloat = 1.0f / 32768.0f;
-
-        // --- Linear interpolation (2-point) ---
-        {
-            MAKE_INTEGRAL_FRACTIONAL(rp_l);
-            int32_t i0 = rp_l_integral;
-            int32_t i1 = i0 + 1; if (i1 >= kSharedDelaySize) i1 = 0;
-            float x0 = delay_buffer_[i0].l * kToFloat;
-            float x1 = delay_buffer_[i1].l * kToFloat;
-            delayed_l = x0 + (x1 - x0) * rp_l_fractional;
-        }
-        {
-            MAKE_INTEGRAL_FRACTIONAL(rp_r);
-            int32_t i0 = rp_r_integral;
-            int32_t i1 = i0 + 1; if (i1 >= kSharedDelaySize) i1 = 0;
-            float x0 = delay_buffer_[i0].r * kToFloat;
-            float x1 = delay_buffer_[i1].r * kToFloat;
-            delayed_r = x0 + (x1 - x0) * rp_r_fractional;
+            // Resync interval: shorter at higher effect
+            resync_timer = 0.05f + (1.0f - effect_amount) * 0.2f;
         }
 
-        // --- "Smear Magic" (Internal Feedback) ---
-        float effect_ramp = fminf(effect_amount / pitch_threshold, 1.0f);
+        // Advance corrupted read position
+        corrupt_read_pos += corrupt_read_speed;
+        if (corrupt_read_pos >= buffer_size_f) corrupt_read_pos -= buffer_size_f;
+        if (corrupt_read_pos < 0.0f) corrupt_read_pos += buffer_size_f;
 
-        // Feedback now maxes out at 0.75 *at 80% knob*
-        const float max_feedback_level = 0.75f; // Tune this max level
-        float feedback_amount = effect_ramp * max_feedback_level;
-        
-        // Input amount now hits its minimum *at 80% knob* and stays there
-        float input_amount = 1.0f - (effect_ramp * 0.85f); 
-        
-        float feedback_in_l = mix_A * input_amount + (feedback_l * feedback_amount);
-        float feedback_in_r = mix_B * input_amount + (feedback_r * feedback_amount);
-        
-        delayed_l += feedback_in_l;
-        delayed_r += feedback_in_r;
-        
-        feedback_l = stmlib::SoftLimit(delayed_l);
-        feedback_r = stmlib::SoftLimit(delayed_r);
+        // --- Random position jumps (frame corruption) ---
+        float jump_chance = effect_amount * effect_amount * 0.005f * (1.0f + degradation * 3.0f);
+        float rnd_jump = (float)((corrupt_rng >> 8) & 0x7fffff) / 8388607.0f;
+        if (rnd_jump < jump_chance) {
+            corrupt_rng = corrupt_rng * 1664525u + 1013904223u;
+            float jump_offset = (float)(corrupt_rng % kSharedDelaySize);
+            corrupt_read_pos = jump_offset;
+        }
 
-        // --- Set Output ---
-        processed_A = feedback_l;
-        processed_B = feedback_r;
+        // --- Read from corrupted position ---
+        float rp = corrupt_read_pos;
+        float read_l, read_r;
+        {
+            MAKE_INTEGRAL_FRACTIONAL(rp);
+            int32_t i0 = rp_integral;
+            int32_t i1 = i0 + 1; if (i1 >= kSharedDelaySize) i1 = 0;
+            read_l = (delay_buffer_[i0].l + (delay_buffer_[i1].l - delay_buffer_[i0].l) * rp_fractional) * kToFloat;
+            read_r = (delay_buffer_[i0].r + (delay_buffer_[i1].r - delay_buffer_[i0].r) * rp_fractional) * kToFloat;
+        }
+
+        // --- Bit manipulation (XOR corruption) ---
+        if (effect_amount > 0.2f) {
+            // Corrupt the integer representation
+            const uint32_t masks[] = { 0xFF00, 0xFC00, 0xF000, 0xC000 };
+            uint32_t mask = masks[quality];
+            float corruption_amount = (effect_amount - 0.2f) / 0.8f;
+
+            float rnd_bit = (float)((corrupt_rng >> 16) & 0xFF) / 255.0f;
+            if (rnd_bit < corruption_amount * 0.3f) {
+                int16_t sl = (int16_t)(read_l * 32768.0f);
+                int16_t sr = (int16_t)(read_r * 32768.0f);
+                sl ^= (int16_t)(corrupt_rng & mask);
+                sr ^= (int16_t)((corrupt_rng >> 4) & mask);
+                read_l = (float)sl * kToFloat;
+                read_r = (float)sr * kToFloat;
+            }
+        }
+
+        // --- Frame freeze (frozen MP3 frame) ---
+        freeze_timer -= kSamplePeriod;
+        if (!frame_frozen) {
+            float freeze_chance = effect_amount * effect_amount * 0.01f * (1.0f + degradation * 2.0f);
+            float rnd_frz = (float)((corrupt_rng >> 12) & 0xFFF) / 4095.0f;
+            if (rnd_frz < freeze_chance) {
+                frame_frozen = true;
+                frozen_l = read_l;
+                frozen_r = read_r;
+                // Freeze duration: 5-50ms
+                freeze_timer = 0.005f + (float)((corrupt_rng >> 20) & 0xFF) / 255.0f * 0.045f;
+            }
+        }
+        if (frame_frozen) {
+            read_l = frozen_l;
+            read_r = frozen_r;
+            if (freeze_timer <= 0.0f) {
+                frame_frozen = false;
+            }
+        }
+
+        // --- Codec reconstruction lowpass ---
+        {
+            static float recon_lp_l = 0.0f, recon_lp_r = 0.0f;
+            float recon_coeff = fb_lp_coeff;  // quality-dependent
+            ONE_POLE(recon_lp_l, read_l, recon_coeff);
+            ONE_POLE(recon_lp_r, read_r, recon_coeff);
+            read_l = recon_lp_l;
+            read_r = recon_lp_r;
+        }
+
+        processed_A = read_l;
+        processed_B = read_r;
       } else {
         // --- CW: Glitches ---
         float effect_amount_sqrtf = sqrtf(effect_amount);
@@ -2129,9 +1915,8 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
         static float latched_r_ = 0.0f;
         static bool decimator_needs_reset_ = true;
 
-        // Decimator: quality 0=lofi(÷6), 1=normal(÷3), 2=high(÷2), 3=best(none)
-        int decimation_factor = (quality == 0) ? 6 : (quality == 1) ? 3 : (quality == 2) ? 2 : 1;
-        decimation_counter_ = (decimation_counter_ + 1) % decimation_factor;
+        // Decimator: quality 0=lofi(÷8=12kHz), 1=(÷5=~19kHz), 2=(÷3=32kHz), 3=(÷2=48kHz)
+        if (++decimation_counter_ >= decimation_factor) decimation_counter_ = 0;
         if (decimation_counter_ == 0 || decimator_needs_reset_) {
             // "Latch" a new sample
             latched_l_ = mix_A;
@@ -2155,7 +1940,7 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
         static float birdie_lfo_phase_ = 0.0f;
         static float birdie_lfo_target_val_ = 0.5f;
         static float birdie_lfo_current_val_ = 0.5f;
-        static float loop_read_speed = 0.5f;
+        static float loop_read_speed = 1.0f;
         static bool force_loop_needs_capture = true;
         const float force_loop_threshold = 0.99f;
         static float force_loop_crossfade_center_ = 0.5f;
@@ -2163,7 +1948,7 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
         const float silence_threshold = 0.0001f;
         bool is_silent = (fabs(mix_A) < silence_threshold) && (fabs(mix_B) < silence_threshold);
 
-        glitch_timer -= 1.0f / 96000.0f;
+        glitch_timer -= kSamplePeriod;
 
         // --- Glitch Trigger Logic ---
         if (effect_amount >= force_loop_threshold) {
@@ -2178,20 +1963,20 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
                 loop_length_f = 11520.0f; // 120ms
                 loop_start_pos_f = (float)(static_cast<int32_t>(shared_write_pos_ - loop_length_f + kSharedDelaySize) % kSharedDelaySize);
                 loop_read_pos_f = loop_start_pos_f;
-                force_loop_crossfade_center_ = crossfade;
+                force_loop_crossfade_center_ = f.crossfade;
                 force_loop_needs_capture = false;
             }
 
-            float delta = crossfade - force_loop_crossfade_center_;
+            float delta = f.crossfade - force_loop_crossfade_center_;
             const float speed_sensitivity = 2.0f;
-            loop_read_speed = 0.5f + delta * speed_sensitivity;
+            loop_read_speed = 1.0f + delta * speed_sensitivity;
         } else {
             // --- NORMAL PROBABILISTIC ZONE (0% to 99%) ---
             
             force_loop_needs_capture = true; 
             
             if (currently_glitching) {
-                glitch_hold_duration -= 1.0f / 96000.0f;
+                glitch_hold_duration -= kSamplePeriod;
                 if (glitch_hold_duration <= 0.0f || is_silent) {
                     currently_glitching = false;
                     pitch_glitching = false;
@@ -2201,7 +1986,7 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
             } else {
                 if (glitch_timer <= 0.0f) {
                   
-                  float glitch_chance = sqrtf(effect_amount) * 0.25f;
+                  float glitch_chance = effect_amount_sqrtf * 0.25f;
                   
                   if (Random::GetFloat() < glitch_chance && !is_silent) {
                     
@@ -2237,7 +2022,7 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
                         glitch_read_pos_f = (float)((shared_write_pos_ - random_offset + kSharedDelaySize) % kSharedDelaySize);
 
                     } else { // This is a micro_loop
-                        loop_read_speed = 0.5f; 
+                        loop_read_speed = 1.0f;
                         
                         // Was 24000.0f (0.25 sec). Let's try 96000.0f (1 sec).
                         float max_loop_length = 96000.0f * effect_amount;
@@ -2268,26 +2053,43 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
                 }
                 
                 MAKE_INTEGRAL_FRACTIONAL(glitch_read_pos_f);
-                { /* (Hermite code) */
+                {
                     int32_t index_integral = glitch_read_pos_f_integral;
                     float index_fractional = glitch_read_pos_f_fractional;
-                    const float kToFloat = 1.0f / 32768.0f;
-                    float xm1_l = static_cast<float>(delay_buffer_[(index_integral - 1 + kSharedDelaySize) % kSharedDelaySize].l) * kToFloat;
-                    float x0_l  = static_cast<float>(delay_buffer_[index_integral].l) * kToFloat;
-                    float x1_l  = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].l) * kToFloat;
-                    float x2_l  = static_cast<float>(delay_buffer_[(index_integral + 2) % kSharedDelaySize].l) * kToFloat;
-                    float xm1_r = static_cast<float>(delay_buffer_[(index_integral - 1 + kSharedDelaySize) % kSharedDelaySize].r) * kToFloat;
-                    float x0_r  = static_cast<float>(delay_buffer_[index_integral].r) * kToFloat;
-                    float x1_r  = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].r) * kToFloat;
-                    float x2_r  = static_cast<float>(delay_buffer_[(index_integral + 2) % kSharedDelaySize].r) * kToFloat;
-                    FloatFrame c = { (x1_l - xm1_l) * 0.5f, (x1_r - xm1_r) * 0.5f };
-                    FloatFrame v = { (float)(x0_l - x1_l), (float)(x0_r - x1_r)};
-                    FloatFrame w = { c.l + v.l, c.r + v.r };
-                    FloatFrame a = { w.l + v.l + (x2_l - x0_l) * 0.5f, w.r + v.r + (x2_r - x0_r) * 0.5f };
-                    FloatFrame b_neg = { w.l + a.l, w.r + a.r };
-                    float t = index_fractional;
-                    glitch_l = ((((a.l * t) - b_neg.l) * t + c.l) * t + x0_l);
-                    glitch_r = ((((a.r * t) - b_neg.r) * t + c.r) * t + x0_r);
+          
+
+                    if (quality == 0) {
+                        // Nearest-neighbor: chunky, aliased
+                        int32_t idx = (index_fractional > 0.5f) ? ((index_integral + 1) % kSharedDelaySize) : index_integral;
+                        glitch_l = static_cast<float>(delay_buffer_[idx].l) * kToFloat;
+                        glitch_r = static_cast<float>(delay_buffer_[idx].r) * kToFloat;
+                    } else if (quality == 1) {
+                        // Linear interpolation: rougher than Hermite
+                        float x0_l = static_cast<float>(delay_buffer_[index_integral].l) * kToFloat;
+                        float x1_l = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].l) * kToFloat;
+                        float x0_r = static_cast<float>(delay_buffer_[index_integral].r) * kToFloat;
+                        float x1_r = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].r) * kToFloat;
+                        glitch_l = x0_l + (x1_l - x0_l) * index_fractional;
+                        glitch_r = x0_r + (x1_r - x0_r) * index_fractional;
+                    } else {
+                        // Hermite (4-point cubic): smooth
+                        float xm1_l = static_cast<float>(delay_buffer_[(index_integral - 1 + kSharedDelaySize) % kSharedDelaySize].l) * kToFloat;
+                        float x0_l  = static_cast<float>(delay_buffer_[index_integral].l) * kToFloat;
+                        float x1_l  = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].l) * kToFloat;
+                        float x2_l  = static_cast<float>(delay_buffer_[(index_integral + 2) % kSharedDelaySize].l) * kToFloat;
+                        float xm1_r = static_cast<float>(delay_buffer_[(index_integral - 1 + kSharedDelaySize) % kSharedDelaySize].r) * kToFloat;
+                        float x0_r  = static_cast<float>(delay_buffer_[index_integral].r) * kToFloat;
+                        float x1_r  = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].r) * kToFloat;
+                        float x2_r  = static_cast<float>(delay_buffer_[(index_integral + 2) % kSharedDelaySize].r) * kToFloat;
+                        FloatFrame c = { (x1_l - xm1_l) * 0.5f, (x1_r - xm1_r) * 0.5f };
+                        FloatFrame v = { (float)(x0_l - x1_l), (float)(x0_r - x1_r)};
+                        FloatFrame w = { c.l + v.l, c.r + v.r };
+                        FloatFrame a = { w.l + v.l + (x2_l - x0_l) * 0.5f, w.r + v.r + (x2_r - x0_r) * 0.5f };
+                        FloatFrame b_neg = { w.l + a.l, w.r + a.r };
+                        float t = index_fractional;
+                        glitch_l = ((((a.l * t) - b_neg.l) * t + c.l) * t + x0_l);
+                        glitch_r = ((((a.r * t) - b_neg.r) * t + c.r) * t + x0_r);
+                    }
                 }
 
             } else if (micro_looping) {
@@ -2302,38 +2104,54 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
                     loop_read_pos_f += loop_length_f;
                 }
                 
-                float read_pos_for_hermite = fmodf(loop_read_pos_f, (float)kSharedDelaySize);
-                if (read_pos_for_hermite < 0.0f) {
-                    read_pos_for_hermite += (float)kSharedDelaySize;
-                }
+                float read_pos_for_hermite = loop_read_pos_f;
+                while (read_pos_for_hermite >= (float)kSharedDelaySize) read_pos_for_hermite -= (float)kSharedDelaySize;
+                while (read_pos_for_hermite < 0.0f) read_pos_for_hermite += (float)kSharedDelaySize;
 
                 MAKE_INTEGRAL_FRACTIONAL(read_pos_for_hermite);
-                { /* (Hermite code) */
+                {
                     int32_t index_integral = read_pos_for_hermite_integral;
                     float index_fractional = read_pos_for_hermite_fractional;
-                    const float kToFloat = 1.0f / 32768.0f;
-                    float xm1_l = static_cast<float>(delay_buffer_[(index_integral - 1 + kSharedDelaySize) % kSharedDelaySize].l) * kToFloat;
-                    float x0_l  = static_cast<float>(delay_buffer_[index_integral].l) * kToFloat;
-                    float x1_l  = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].l) * kToFloat;
-                    float x2_l  = static_cast<float>(delay_buffer_[(index_integral + 2) % kSharedDelaySize].l) * kToFloat;
-                    float xm1_r = static_cast<float>(delay_buffer_[(index_integral - 1 + kSharedDelaySize) % kSharedDelaySize].r) * kToFloat;
-                    float x0_r  = static_cast<float>(delay_buffer_[index_integral].r) * kToFloat;
-                    float x1_r  = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].r) * kToFloat;
-                    float x2_r  = static_cast<float>(delay_buffer_[(index_integral + 2) % kSharedDelaySize].r) * kToFloat;
-                    FloatFrame c = { (x1_l - xm1_l) * 0.5f, (x1_r - xm1_r) * 0.5f };
-                    FloatFrame v = { (float)(x0_l - x1_l), (float)(x0_r - x1_r)};
-                    FloatFrame w = { c.l + v.l, c.r + v.r };
-                    FloatFrame a = { w.l + v.l + (x2_l - x0_l) * 0.5f, w.r + v.r + (x2_r - x0_r) * 0.5f };
-                    FloatFrame b_neg = { w.l + a.l, w.r + a.r };
-                    float t = index_fractional;
-                    glitch_l = ((((a.l * t) - b_neg.l) * t + c.l) * t + x0_l);
-                    glitch_r = ((((a.r * t) - b_neg.r) * t + c.r) * t + x0_r);
+          
+
+                    if (quality == 0) {
+                        // Nearest-neighbor
+                        int32_t idx = (index_fractional > 0.5f) ? ((index_integral + 1) % kSharedDelaySize) : index_integral;
+                        glitch_l = static_cast<float>(delay_buffer_[idx].l) * kToFloat;
+                        glitch_r = static_cast<float>(delay_buffer_[idx].r) * kToFloat;
+                    } else if (quality == 1) {
+                        // Linear interpolation
+                        float x0_l = static_cast<float>(delay_buffer_[index_integral].l) * kToFloat;
+                        float x1_l = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].l) * kToFloat;
+                        float x0_r = static_cast<float>(delay_buffer_[index_integral].r) * kToFloat;
+                        float x1_r = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].r) * kToFloat;
+                        glitch_l = x0_l + (x1_l - x0_l) * index_fractional;
+                        glitch_r = x0_r + (x1_r - x0_r) * index_fractional;
+                    } else {
+                        // Hermite (4-point cubic)
+                        float xm1_l = static_cast<float>(delay_buffer_[(index_integral - 1 + kSharedDelaySize) % kSharedDelaySize].l) * kToFloat;
+                        float x0_l  = static_cast<float>(delay_buffer_[index_integral].l) * kToFloat;
+                        float x1_l  = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].l) * kToFloat;
+                        float x2_l  = static_cast<float>(delay_buffer_[(index_integral + 2) % kSharedDelaySize].l) * kToFloat;
+                        float xm1_r = static_cast<float>(delay_buffer_[(index_integral - 1 + kSharedDelaySize) % kSharedDelaySize].r) * kToFloat;
+                        float x0_r  = static_cast<float>(delay_buffer_[index_integral].r) * kToFloat;
+                        float x1_r  = static_cast<float>(delay_buffer_[(index_integral + 1) % kSharedDelaySize].r) * kToFloat;
+                        float x2_r  = static_cast<float>(delay_buffer_[(index_integral + 2) % kSharedDelaySize].r) * kToFloat;
+                        FloatFrame c = { (x1_l - xm1_l) * 0.5f, (x1_r - xm1_r) * 0.5f };
+                        FloatFrame v = { (float)(x0_l - x1_l), (float)(x0_r - x1_r)};
+                        FloatFrame w = { c.l + v.l, c.r + v.r };
+                        FloatFrame a = { w.l + v.l + (x2_l - x0_l) * 0.5f, w.r + v.r + (x2_r - x0_r) * 0.5f };
+                        FloatFrame b_neg = { w.l + a.l, w.r + a.r };
+                        float t = index_fractional;
+                        glitch_l = ((((a.l * t) - b_neg.l) * t + c.l) * t + x0_l);
+                        glitch_r = ((((a.r * t) - b_neg.r) * t + c.r) * t + x0_r);
+                    }
                 }
             }
         }
         
         // --- "Birdie" ---
-        birdie_lfo_phase_ += (0.5f + effect_amount * 3.0f) / 96000.0f;
+        birdie_lfo_phase_ += (0.5f + effect_amount * 3.0f) * kSamplePeriod;
         if (birdie_lfo_phase_ >= 1.0f) {
             birdie_lfo_phase_ -= 1.0f;
             birdie_lfo_target_val_ = Random::GetFloat();
@@ -2342,15 +2160,18 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
 
         const int kBirdieUpdateRate = 32; 
         if (birdie_update_counter_ == 0) {
-          float bpf_cutoff = 0.1f + (birdie_lfo_current_val_ * 0.2f);
-          float bpf_resonance = 1.0f + effect_amount_sqrtf * 30.0f;
-          
-          lossy_bpf_l_.set_f_q<stmlib::FREQUENCY_FAST>(bpf_cutoff, bpf_resonance);
-          lossy_bpf_r_.set_f_q<stmlib::FREQUENCY_FAST>(bpf_cutoff, bpf_resonance);
+          // Mirrored birdie cutoff: L and R sweep in opposite directions
+          float bpf_cutoff_l = 0.1f + (birdie_lfo_current_val_ * 0.2f);
+          float bpf_cutoff_r = 0.1f + ((1.0f - birdie_lfo_current_val_) * 0.2f);
+          // Birdie resonance: off at q3, screeching at q0
+          float bpf_resonance = 1.0f + effect_amount_sqrtf * max_birdie_resonance;
+
+          lossy_bpf_l_.set_f_q<stmlib::FREQUENCY_FAST>(bpf_cutoff_l, bpf_resonance);
+          lossy_bpf_r_.set_f_q<stmlib::FREQUENCY_FAST>(bpf_cutoff_r, bpf_resonance);
         }
 
         // Increment and wrap the counter every sample
-        birdie_update_counter_ = (birdie_update_counter_ + 1) % kBirdieUpdateRate;
+        if (++birdie_update_counter_ >= kBirdieUpdateRate) birdie_update_counter_ = 0;
         
         float base_signal_l = (currently_glitching) ? glitch_l : latched_l_;
         float base_signal_r = (currently_glitching) ? glitch_r : latched_r_;
@@ -2358,47 +2179,493 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
         float birdie_l = lossy_bpf_l_.Process<stmlib::FILTER_MODE_BAND_PASS>(base_signal_l);
         float birdie_r = lossy_bpf_r_.Process<stmlib::FILTER_MODE_BAND_PASS>(base_signal_r);
         
-        // --- Final Mix ---
-        float birdie_mix = effect_amount_sqrtf * 0.5f;
-        
+        // --- Final Mix: no birdie at q3, intense at q0 ---
+        float birdie_mix = effect_amount_sqrtf * birdie_mix_scale;
+
         processed_A = base_signal_l * (1.0f - birdie_mix) + birdie_l * birdie_mix;
         processed_B = base_signal_r * (1.0f - birdie_mix) + birdie_r * birdie_mix;
+
+        // --- Bit crushing: quality 3=none, 2=12bit, 1=10bit, 0=8bit ---
+        if (do_bitcrush) {
+            processed_A = floorf(processed_A * bit_scale + 0.5f) * bit_scale_inv;
+            processed_B = floorf(processed_B * bit_scale + 0.5f) * bit_scale_inv;
+        }
       }
 
     // --- FINAL MIX ---
-    float fade_wet = Interpolate(lut_xfade_in, xfade_amount, 256.0f);
-    float fade_dry = Interpolate(lut_xfade_out, xfade_amount, 256.0f);
-
-    out_A = mix_A * fade_dry + processed_A * fade_wet;
-    out_B = mix_B * fade_dry + processed_B * fade_wet;
-    
     if (write_to_buffer) {
         static int16_t last_written_l = 0;
         static int16_t last_written_r = 0;
 
         if (write_clock) {
-            // heavy math happens only on write_clock samples
             last_written_l = Clip16(mix_A * 32768.0f);
             last_written_r = Clip16(mix_B * 32768.0f);
         }
 
-        // lightweight store (just copy) each sample
         delay_buffer_[shared_write_pos_].l = last_written_l;
         delay_buffer_[shared_write_pos_].r = last_written_r;
 
-        // always advance pointer to keep timeline continuous
         shared_write_pos_++;
         if (shared_write_pos_ >= kSharedDelaySize) shared_write_pos_ = 0;
     }
 
-    output->l = Clip16(out_A * 32768.0f);
-    output->r = Clip16(out_B * 32768.0f);
-    output++;
+    MixerWriteOutput(output++, f, processed_A, processed_B);
   }
-
-   previous_parameters_.raw_algorithm = parameters_.raw_algorithm;
-   previous_parameters_.modulation_parameter = parameters_.modulation_parameter;
+  MixerFinalize();
 }
+
+void Modulator::ProcessRadioMixer(ShortFrame* input, ShortFrame* output, size_t size) {
+  MixerPrepareInputs(input, size);
+  int32_t radio_quality = parameters_.carrier_shape;
+  float degradation = radio_quality / 3.0f;
+
+  float algo_start = SkewRawAlgorithm(previous_parameters_.raw_algorithm);
+  float algo_end = SkewRawAlgorithm(parameters_.raw_algorithm);
+  ParameterInterpolator algo_interp(&algo_start, algo_end, size);
+  ParameterInterpolator xfade_interp(
+      &previous_parameters_.modulation_parameter,
+      parameters_.modulation_parameter, size);
+
+  static float comb_feedback_l = 0.0f;
+  static float comb_feedback_r = 0.0f;
+  static float jitter_lp = 0.0f;
+  static int jitter_counter = 0;
+
+  float bw_cutoff = 0.35f - degradation * 0.2f;
+  filter_[6].set_f<stmlib::FREQUENCY_FAST>(bw_cutoff);
+  filter_[7].set_f<stmlib::FREQUENCY_FAST>(bw_cutoff);
+
+  float* in_1 = buffer_[0];
+  float* in_2 = buffer_[1];
+
+  while (size--) {
+    MixerFrame f = MixerComputeFrame(
+        *in_1++, *in_2++, xfade_interp.Next(), algo_interp.Next());
+
+    float processed_A = 0.0f;
+    float processed_B = 0.0f;
+
+    if (f.algo < 0.0f) {
+      // --- CCW: AM/FM Radio Demodulation Artifacts ---
+      float bw_limited_A = filter_[6].Process<stmlib::FILTER_MODE_LOW_PASS>(f.mix_A);
+      float bw_limited_B = filter_[7].Process<stmlib::FILTER_MODE_LOW_PASS>(f.mix_B);
+      float bw_mix = f.effect_amount * 0.8f;
+      float band_A = f.mix_A + (bw_limited_A - f.mix_A) * bw_mix;
+      float band_B = f.mix_B + (bw_limited_B - f.mix_B) * bw_mix;
+
+      float carrier_freq = 0.15f + f.effect_amount * 0.2f;
+      radio_carrier_phase_ += carrier_freq;
+      if (radio_carrier_phase_ > 1.0f) radio_carrier_phase_ -= 1.0f;
+      float cp = radio_carrier_phase_ * 2.0f - 1.0f;
+      float carrier_tone = 4.0f * cp * (1.0f - fabs(cp));
+      float carrier_bleed = carrier_tone * f.effect_amount * degradation * 0.15f;
+
+      float rect_A = fabs(band_A);
+      float rect_B = fabs(band_B);
+      float rect_mix = f.effect_amount * 0.3f * degradation;
+
+      float static_raw = (Random::GetFloat() - 0.5f) * 2.0f;
+      ONE_POLE(radio_static_lp_, static_raw, 0.3f);
+      float static_amount = f.effect_amount * (0.05f + degradation * 0.3f);
+
+      radio_fade_lfo_phase_ += 0.00003f + degradation * 0.00005f;
+      if (radio_fade_lfo_phase_ > 1.0f) radio_fade_lfo_phase_ -= 1.0f;
+      float fade_lfo = radio_fade_lfo_phase_ * 2.0f - 1.0f;
+      fade_lfo = 4.0f * fade_lfo * (1.0f - fabs(fade_lfo));
+      float fade_depth = f.effect_amount * degradation * 0.4f;
+      float fade_gain = 1.0f - fade_depth * (0.5f + 0.5f * fade_lfo);
+
+      processed_A = (band_A * (1.0f - rect_mix) + rect_A * rect_mix) * fade_gain
+                   + carrier_bleed + radio_static_lp_ * static_amount;
+      processed_B = (band_B * (1.0f - rect_mix) + rect_B * rect_mix) * fade_gain
+                   + carrier_bleed * 0.7f + radio_static_lp_ * static_amount * 0.8f;
+
+    } else {
+      // --- CW: Comb Filter + Jitter Resonance (Multipath Interference) ---
+      float inv = (1.0f - f.effect_amount);
+      float delay_samples = 48.0f + (1920.0f - 48.0f) * inv * inv;
+
+      if (++jitter_counter >= 4) {
+          jitter_counter = 0;
+          float jitter_raw = (Random::GetFloat() - 0.5f) * 2.0f;
+          ONE_POLE(jitter_lp, jitter_raw, 0.18f);
+      }
+
+      float jitter_depth;
+      if (radio_quality == 0) jitter_depth = 0.0f;
+      else if (radio_quality == 1) jitter_depth = 0.5f;
+      else if (radio_quality == 2) jitter_depth = 2.0f;
+      else jitter_depth = 6.0f;
+
+      float jitter_amount = jitter_lp * jitter_depth * f.effect_amount;
+      float jittered_delay_l = delay_samples + jitter_amount;
+      float jittered_delay_r = delay_samples - jitter_amount * 0.6f;
+      if (jittered_delay_l < 1.0f) jittered_delay_l = 1.0f;
+      if (jittered_delay_r < 1.0f) jittered_delay_r = 1.0f;
+
+      float feedback_amount = 0.6f + f.effect_amount * 0.32f;
+
+      float write_l = f.mix_A + comb_feedback_l * feedback_amount;
+      float write_r = f.mix_B + comb_feedback_r * feedback_amount;
+      delay_buffer_[shared_write_pos_].l = Clip16(write_l * 32768.0f);
+      delay_buffer_[shared_write_pos_].r = Clip16(write_r * 32768.0f);
+
+      float read_pos_l = (float)shared_write_pos_ - jittered_delay_l;
+      if (read_pos_l < 0.0f) read_pos_l += kSharedDelaySize;
+      MAKE_INTEGRAL_FRACTIONAL(read_pos_l);
+      int32_t i0_l = read_pos_l_integral;
+      int32_t i1_l = i0_l + 1; if (i1_l >= kSharedDelaySize) i1_l = 0;
+      float delayed_l = delay_buffer_[i0_l].l * kToFloat
+          + (delay_buffer_[i1_l].l * kToFloat - delay_buffer_[i0_l].l * kToFloat)
+          * read_pos_l_fractional;
+
+      float read_pos_r = (float)shared_write_pos_ - jittered_delay_r;
+      if (read_pos_r < 0.0f) read_pos_r += kSharedDelaySize;
+      MAKE_INTEGRAL_FRACTIONAL(read_pos_r);
+      int32_t i0_r = read_pos_r_integral;
+      int32_t i1_r = i0_r + 1; if (i1_r >= kSharedDelaySize) i1_r = 0;
+      float delayed_r = delay_buffer_[i0_r].r * kToFloat
+          + (delay_buffer_[i1_r].r * kToFloat - delay_buffer_[i0_r].r * kToFloat)
+          * read_pos_r_fractional;
+
+      comb_feedback_l = stmlib::SoftLimit(delayed_l);
+      comb_feedback_r = stmlib::SoftLimit(delayed_r);
+
+      shared_write_pos_++;
+      if (shared_write_pos_ >= kSharedDelaySize) shared_write_pos_ = 0;
+
+      float comb_mix = 0.5f + f.effect_amount * 0.3f;
+      processed_A = f.mix_A * (1.0f - comb_mix) + delayed_l * comb_mix;
+      processed_B = f.mix_B * (1.0f - comb_mix) + delayed_r * comb_mix;
+    }
+
+    MixerWriteOutput(output++, f, processed_A, processed_B);
+  }
+  MixerFinalize();
+}
+
+void Modulator::ProcessDreamyMixer(ShortFrame* input, ShortFrame* output, size_t size) {
+  MixerPrepareInputs(input, size);
+
+  float algo_start = SkewRawAlgorithm(previous_parameters_.raw_algorithm);
+  float algo_end = SkewRawAlgorithm(parameters_.raw_algorithm);
+  ParameterInterpolator algo_interp(&algo_start, algo_end, size);
+  ParameterInterpolator xfade_interp(
+      &previous_parameters_.modulation_parameter,
+      parameters_.modulation_parameter, size);
+
+  int quality = 3 - parameters_.carrier_shape;
+  const float degradation = 1.0f - (quality / 3.0f);
+  const float mod_scale = 1.0f + degradation * 2.0f;
+  const float smear_drive = 1.0f + degradation * 3.0f;
+  const float lp_coeffs[] = { 0.12f, 0.25f, 0.5f, 0.8f };
+  const float fb_lp_coeff = lp_coeffs[quality];
+
+  const float kToFloat = 1.0f / 32768.0f;
+
+  float* in_1 = buffer_[0];
+  float* in_2 = buffer_[1];
+
+  while (size--) {
+    MixerFrame f = MixerComputeFrame(
+        *in_1++, *in_2++, xfade_interp.Next(), algo_interp.Next());
+    float mix_A = f.mix_A;
+    float mix_B = f.mix_B;
+    float effect_amount = f.effect_amount;
+
+    float processed_A = 0.0f;
+    float processed_B = 0.0f;
+
+    if (f.algo < 0.0f) {
+      // --- CCW: Granular Smear / Chorus ---
+      static float feedback_l = 0.0f, feedback_r = 0.0f;
+      static float smear_lfo_phase_ = 0.0f;
+      static float smear_lfo_target_val_ = 0.5f;
+      static float smear_lfo_current_val_ = 0.5f;
+      static float chorus_lfo_phase_ = 0.0f;
+      static float pitch_offset_a_ = 0.0f;
+      static float pitch_offset_b_ = 0.0f;
+
+      float base_delay_samples = 384.0f + effect_amount * 2496.0f;
+
+      // Update Smear LFO - random walk modulates delay time
+      smear_lfo_phase_ += 0.6f * kSamplePeriod;
+      if (smear_lfo_phase_ >= 1.0f) {
+          smear_lfo_phase_ -= 1.0f;
+          float new_target = Random::GetFloat();
+          const float max_jump = 0.3f;
+          if (new_target > smear_lfo_current_val_ + max_jump)
+              new_target = smear_lfo_current_val_ + max_jump;
+          else if (new_target < smear_lfo_current_val_ - max_jump)
+              new_target = smear_lfo_current_val_ - max_jump;
+          smear_lfo_target_val_ = new_target;
+      }
+      ONE_POLE(smear_lfo_current_val_, smear_lfo_target_val_, 0.001f);
+      float smear_mod = (smear_lfo_current_val_ - 0.5f) * 2.0f;
+
+      // Update Chorus LFO
+      chorus_lfo_phase_ += 0.8f * kSamplePeriod;
+      if (chorus_lfo_phase_ >= 1.0f) chorus_lfo_phase_ -= 1.0f;
+      float chorus_mod = Interpolate(lut_sin, chorus_lfo_phase_, 1024.0f);
+
+      float smear_mod_amount = effect_amount * 768.0f * mod_scale;
+      float stereo_offset = (40.0f + chorus_mod * 60.0f) * effect_amount * mod_scale;
+
+      float delay_l_samples = base_delay_samples - stereo_offset + (smear_mod * smear_mod_amount);
+      float delay_r_samples = base_delay_samples + stereo_offset - (smear_mod * smear_mod_amount);
+
+      const float min_delay = 32.0f;
+      delay_l_samples = fmaxf(delay_l_samples, min_delay);
+      delay_r_samples = fmaxf(delay_r_samples, min_delay);
+
+      const float pitch_threshold = 0.8f;
+      float pitch_shift_rate = 0.0f;
+      const float buffer_size_f = (float)kSharedDelaySize;
+      const float half_buffer = buffer_size_f * 0.5f;
+
+      if (effect_amount > pitch_threshold) {
+          float pitch_ramp = (effect_amount - pitch_threshold) / (1.0f - pitch_threshold);
+          pitch_shift_rate = 0.498f * pitch_ramp;
+      } else {
+          pitch_offset_a_ = 0.0f;
+          pitch_offset_b_ = half_buffer;
+      }
+
+      pitch_offset_a_ += pitch_shift_rate;
+      pitch_offset_b_ += pitch_shift_rate;
+
+      if (pitch_offset_a_ >= buffer_size_f) pitch_offset_a_ -= buffer_size_f;
+      if (pitch_offset_b_ >= buffer_size_f) pitch_offset_b_ -= buffer_size_f;
+
+      float delayed_l, delayed_r;
+
+      if (pitch_shift_rate > 0.0f) {
+          // Dual-grain pitch shifter (tick-free)
+          float phase_a = pitch_offset_a_ / buffer_size_f;
+          float window_a = 1.0f - fabsf(2.0f * phase_a - 1.0f);
+
+          float phase_b = pitch_offset_b_ / buffer_size_f;
+          float window_b = 1.0f - fabsf(2.0f * phase_b - 1.0f);
+
+          // Pre-compute base read positions per channel
+          float base_l = (float)shared_write_pos_ - delay_l_samples;
+          if (base_l < 0.0f) base_l += buffer_size_f;
+          float base_r = (float)shared_write_pos_ - delay_r_samples;
+          if (base_r < 0.0f) base_r += buffer_size_f;
+
+          // Grain A
+          float rp_la = base_l + pitch_offset_a_;
+          if (rp_la >= buffer_size_f) rp_la -= buffer_size_f;
+          float rp_ra = base_r + pitch_offset_a_;
+          if (rp_ra >= buffer_size_f) rp_ra -= buffer_size_f;
+
+          float grain_a_l, grain_a_r;
+          {
+              MAKE_INTEGRAL_FRACTIONAL(rp_la);
+              int32_t i0 = rp_la_integral;
+              int32_t i1 = i0 + 1; if (i1 >= kSharedDelaySize) i1 = 0;
+              grain_a_l = (delay_buffer_[i0].l + (delay_buffer_[i1].l - delay_buffer_[i0].l) * rp_la_fractional) * kToFloat;
+          }
+          {
+              MAKE_INTEGRAL_FRACTIONAL(rp_ra);
+              int32_t i0 = rp_ra_integral;
+              int32_t i1 = i0 + 1; if (i1 >= kSharedDelaySize) i1 = 0;
+              grain_a_r = (delay_buffer_[i0].r + (delay_buffer_[i1].r - delay_buffer_[i0].r) * rp_ra_fractional) * kToFloat;
+          }
+
+          // Grain B
+          float rp_lb = base_l + pitch_offset_b_;
+          if (rp_lb >= buffer_size_f) rp_lb -= buffer_size_f;
+          float rp_rb = base_r + pitch_offset_b_;
+          if (rp_rb >= buffer_size_f) rp_rb -= buffer_size_f;
+
+          float grain_b_l, grain_b_r;
+          {
+              MAKE_INTEGRAL_FRACTIONAL(rp_lb);
+              int32_t i0 = rp_lb_integral;
+              int32_t i1 = i0 + 1; if (i1 >= kSharedDelaySize) i1 = 0;
+              grain_b_l = (delay_buffer_[i0].l + (delay_buffer_[i1].l - delay_buffer_[i0].l) * rp_lb_fractional) * kToFloat;
+          }
+          {
+              MAKE_INTEGRAL_FRACTIONAL(rp_rb);
+              int32_t i0 = rp_rb_integral;
+              int32_t i1 = i0 + 1; if (i1 >= kSharedDelaySize) i1 = 0;
+              grain_b_r = (delay_buffer_[i0].r + (delay_buffer_[i1].r - delay_buffer_[i0].r) * rp_rb_fractional) * kToFloat;
+          }
+
+          delayed_l = grain_a_l * window_a + grain_b_l * window_b;
+          delayed_r = grain_a_r * window_a + grain_b_r * window_b;
+      } else {
+          float rp_l = (float)shared_write_pos_ - delay_l_samples;
+          if (rp_l >= buffer_size_f) rp_l -= buffer_size_f;
+          else if (rp_l < 0.0f) rp_l += buffer_size_f;
+          float rp_r = (float)shared_write_pos_ - delay_r_samples;
+          if (rp_r >= buffer_size_f) rp_r -= buffer_size_f;
+          else if (rp_r < 0.0f) rp_r += buffer_size_f;
+
+          {
+              MAKE_INTEGRAL_FRACTIONAL(rp_l);
+              int32_t i0 = rp_l_integral;
+              int32_t i1 = i0 + 1; if (i1 >= kSharedDelaySize) i1 = 0;
+              delayed_l = (delay_buffer_[i0].l + (delay_buffer_[i1].l - delay_buffer_[i0].l) * rp_l_fractional) * kToFloat;
+          }
+          {
+              MAKE_INTEGRAL_FRACTIONAL(rp_r);
+              int32_t i0 = rp_r_integral;
+              int32_t i1 = i0 + 1; if (i1 >= kSharedDelaySize) i1 = 0;
+              delayed_r = (delay_buffer_[i0].r + (delay_buffer_[i1].r - delay_buffer_[i0].r) * rp_r_fractional) * kToFloat;
+          }
+      }
+
+      // --- Feedback ---
+      float effect_ramp = fminf(effect_amount / 0.8f, 1.0f);
+      const float max_feedback_levels[] = { 0.80f, 0.75f, 0.65f, 0.55f };
+      float feedback_amount = effect_ramp * max_feedback_levels[quality];
+
+      static float feedback_energy = 0.0f;
+      {
+          float energy = fabs(feedback_l) + fabs(feedback_r);
+          ONE_POLE(feedback_energy, energy, 0.01f);
+          const float energy_ceiling = 1.5f;
+          if (feedback_energy > energy_ceiling) {
+              feedback_amount *= energy_ceiling / feedback_energy;
+          }
+      }
+
+      float input_amount = 1.0f - (effect_ramp * 0.85f);
+      delayed_l += mix_A * input_amount + feedback_l * feedback_amount;
+      delayed_r += mix_B * input_amount + feedback_r * feedback_amount;
+
+      float effective_drive = smear_drive;
+      if (pitch_shift_rate > 0.0f) {
+          float pitch_ramp = pitch_shift_rate / 0.498f;
+          float drive_reduction = pitch_ramp * (1.0f - 1.0f / smear_drive);
+          effective_drive = smear_drive * (1.0f - drive_reduction);
+      }
+      feedback_l = stmlib::SoftLimit(delayed_l * effective_drive);
+      feedback_r = stmlib::SoftLimit(delayed_r * effective_drive);
+
+      {
+          static float fb_lp_l = 0.0f, fb_lp_r = 0.0f;
+          ONE_POLE(fb_lp_l, feedback_l, fb_lp_coeff);
+          ONE_POLE(fb_lp_r, feedback_r, fb_lp_coeff);
+          feedback_l = fb_lp_l;
+          feedback_r = fb_lp_r;
+      }
+
+      float output_gain = 1.0f / (1.0f + feedback_amount * 0.6f);
+      processed_A = feedback_l * output_gain;
+      processed_B = feedback_r * output_gain;
+
+    } else {
+      // --- CW: Drift ---
+      static float drift_feedback_l = 0.0f, drift_feedback_r = 0.0f;
+      static float drift_lfo_phase = 0.0f;
+      static float drift_lfo_target = 0.5f;
+      static float drift_lfo_current = 0.5f;
+
+      // Base delay: 50-200ms (longer than Smear — creates sustain)
+      float base_delay = 4800.0f + effect_amount * 14400.0f;  // 50ms to 200ms
+
+      // Drift LFO: slow random walk for pitch micro-detuning
+      drift_lfo_phase += 0.2f * kSamplePeriod;  // 0.2Hz
+      if (drift_lfo_phase >= 1.0f) {
+          drift_lfo_phase -= 1.0f;
+          float new_target = Random::GetFloat();
+          const float max_jump = 0.25f;
+          if (new_target > drift_lfo_current + max_jump)
+              new_target = drift_lfo_current + max_jump;
+          else if (new_target < drift_lfo_current - max_jump)
+              new_target = drift_lfo_current - max_jump;
+          drift_lfo_target = new_target;
+      }
+      ONE_POLE(drift_lfo_current, drift_lfo_target, 0.0005f);
+      float drift_mod = (drift_lfo_current - 0.5f) * 40.0f;  // ±20 samples
+
+      // Stereo spread: drift LFO + fixed detune offset at low quality
+      float detune_offset = degradation * 120.0f;  // 0-120 samples (~1.25ms) detuning
+      float delay_l = base_delay + drift_mod + detune_offset;
+      float delay_r = base_delay - drift_mod - detune_offset;
+
+      const float min_delay = 32.0f;
+      delay_l = fmaxf(delay_l, min_delay);
+      delay_r = fmaxf(delay_r, min_delay);
+
+      // Read from delay buffer (halve offsets — buffer is decimated in drift mode)
+      const float buffer_size_f = (float)kSharedDelaySize;
+      float half_delay_l = delay_l * 0.5f;
+      float half_delay_r = delay_r * 0.5f;
+      float rp_l = (float)shared_write_pos_ - half_delay_l;
+      if (rp_l < 0.0f) rp_l += buffer_size_f;
+      float rp_r = (float)shared_write_pos_ - half_delay_r;
+      if (rp_r < 0.0f) rp_r += buffer_size_f;
+
+      float delayed_l, delayed_r;
+      {
+          MAKE_INTEGRAL_FRACTIONAL(rp_l);
+          int32_t i0 = rp_l_integral;
+          int32_t i1 = i0 + 1; if (i1 >= kSharedDelaySize) i1 = 0;
+          delayed_l = (delay_buffer_[i0].l + (delay_buffer_[i1].l - delay_buffer_[i0].l) * rp_l_fractional) * kToFloat;
+      }
+      {
+          MAKE_INTEGRAL_FRACTIONAL(rp_r);
+          int32_t i0 = rp_r_integral;
+          int32_t i1 = i0 + 1; if (i1 >= kSharedDelaySize) i1 = 0;
+          delayed_r = (delay_buffer_[i0].r + (delay_buffer_[i1].r - delay_buffer_[i0].r) * rp_r_fractional) * kToFloat;
+      }
+
+      // Feedback amount: 0.3 at knob=0, up to 0.98 at knob=100%
+      float feedback_amount = 0.3f + effect_amount * 0.68f;
+
+      // Progressive lowpass: each recirculation loses highs
+      // q3 = bright (0.8), q0 = dark (0.12), knob narrows further
+      float filter_coeff = fb_lp_coeff * (1.0f - effect_amount * 0.5f);
+      if (filter_coeff < 0.05f) filter_coeff = 0.05f;
+
+      // Mix input with filtered feedback
+      float input_amount = 1.0f - effect_amount * 0.7f;  // dry fades as sustain rises
+      float fb_l = delayed_l * feedback_amount + mix_A * input_amount;
+      float fb_r = delayed_r * feedback_amount + mix_B * input_amount;
+
+      // Apply progressive lowpass on feedback path
+      ONE_POLE(drift_feedback_l, fb_l, filter_coeff);
+      ONE_POLE(drift_feedback_r, fb_r, filter_coeff);
+
+      // Saturate feedback — low quality drives harder into SoftLimit
+      float drift_drive = 1.0f + degradation * 2.0f;  // 1.0 (clean) to 3.0 (warm)
+      drift_feedback_l = stmlib::SoftLimit(drift_feedback_l * drift_drive);
+      drift_feedback_r = stmlib::SoftLimit(drift_feedback_r * drift_drive);
+
+      processed_A = drift_feedback_l;
+      processed_B = drift_feedback_r;
+    }
+
+    // --- Write to delay buffer ---
+    if (f.algo >= 0.0f) {
+      // Drift mode: decimate writes (every 2nd sample) to double buffer range
+      drift_decimation_active_ = true;
+      drift_decimate_counter_ ^= 1;
+      if (drift_decimate_counter_) {
+        delay_buffer_[shared_write_pos_].l = Clip16(mix_A * 32768.0f);
+        delay_buffer_[shared_write_pos_].r = Clip16(mix_B * 32768.0f);
+        shared_write_pos_++;
+        if (shared_write_pos_ >= kSharedDelaySize) shared_write_pos_ = 0;
+      }
+    } else {
+      // Smear mode: full-rate writes
+      drift_decimation_active_ = false;
+      drift_decimate_counter_ = 0;
+      delay_buffer_[shared_write_pos_].l = Clip16(mix_A * 32768.0f);
+      delay_buffer_[shared_write_pos_].r = Clip16(mix_B * 32768.0f);
+      shared_write_pos_++;
+      if (shared_write_pos_ >= kSharedDelaySize) shared_write_pos_ = 0;
+    }
+
+    MixerWriteOutput(output++, f, processed_A, processed_B);
+  }
+  MixerFinalize();
+}
+
 /* static */
 Modulator::XmodFn Modulator::xmod_table_[] = {
   &Modulator::ProcessXmod<ALGORITHM_XFADE, ALGORITHM_FOLD>,

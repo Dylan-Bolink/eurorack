@@ -15,10 +15,10 @@ Hold the **Int. Osc** button and turn the big knob.
 | 1 | **Crush** | Artifacts |
 | 2 | **Lo-Fi** | Artifacts |
 | 3 | **Modern Lo-Fi** | Artifacts |
-| 4 | **Frequency Shifter** | Parasites |
-| 5 | **Dual Bit Mangler** | Parasites |
-| 6 | **Chebyshev Comparator** | Parasites |
-| 7 | **Doppler** | Parasites |
+| 4 | **Radio** | Artifacts |
+| 5 | **Dream** | Artifacts |
+| 6 | **Frequency Shifter** | Mutable Instruments |
+| 7 | **Dual Bit Mangler** | Parasites |
 | 8 | **Delay / Locked Delay** | Parasites + Artifacts tweak |
 | 9 | **Meta (original)** | Mutable Instruments |
 
@@ -35,10 +35,10 @@ Each mode introduces **stereo separation**, achieved through subtle differences 
 ---
 
 ### 1. Crush
-> *Digital grit meeting analog warmth.*
+> *Digital math destruction — from quantized chaos to alien harmonics.*
 
-- **Left side (CCW)**: sample-rate reduction with added saturation.  
-- **Right side (CW)**: blend of saturation, filtering, and wavefolding. All melting together near the extreme end.
+- **Left side (CCW)**: Bitcrusher — bitwise operations (OR, XOR, SHIFT) on quantized signals. Quality controls bit depth.
+- **Right side (CW)**: Chebyshev waveshaping — comparator logic fed through polynomial distortion. Quality controls harmonic degree.
 
 ---
 
@@ -53,9 +53,22 @@ Each mode introduces **stereo separation**, achieved through subtle differences 
 ### 3. Modern Lo-Fi
 > *MP3 dreams and broken LimeWire downloads.*
 
-- **Left side (CCW)**: Smearing and soft time blur.  
-  Adds subtle delay feedback for movement and texture.  
-- **Right side (CW)**: 32khz decimator, micro-looping and stutter, evolving into MP3-style “birdie” artifacts. At the final 1%, the effect enters a looping state. The **Timbre knob** becomes a loop-speed control.
+- **Left side (CCW)**: CORRUPT PLACEHOLDER TEXT
+- **Right side (CW)**: Decimator, micro-looping and stutter, evolving into MP3-style “birdie” artifacts. At the final 1%, the effect enters a looping state. The **Timbre knob** becomes a loop-speed control.
+
+### 4. Radio
+> *Transmission artifacts and multipath interference.*
+
+- **Left side (CCW)**: AM/FM demodulation artifacts — carrier bleed, bandwidth limiting, rectification distortion, static, and signal fading. Quality controls radio band (strong signal to numbers station).
+- **Right side (CW)**: Comb filter resonance — multipath interference simulation with jitter modulation. Quality controls jitter depth (multipath severity).
+
+---
+
+### 5. Dreamy
+> *placeholder text*
+- **Left side (CCW)**: Smearing and soft time blur.
+  Adds subtle delay feedback for movement and texture.
+- **Right side (CW)**: DRIFT PLACEHOLDER TEXT
 
 ---
 

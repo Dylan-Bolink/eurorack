@@ -106,6 +106,9 @@ class Ui {
   float last_algo_pot_;
   bool feature_mode_changed_;
   uint8_t feature_mode_;
+
+  bool catch_up_active_;
+  float catch_up_target_;
   
   static const uint8_t palette_[10][3];
   static const uint8_t freq_shifter_palette_[10][3];

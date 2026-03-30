@@ -52,6 +52,15 @@ const size_t kNumOscillators = 1;
 typedef struct { short l; short r; } ShortFrame;
 typedef struct { float l; float r; } FloatFrame;
 
+struct MixerFrame {
+  float mix_A;
+  float mix_B;
+  float effect_amount;
+  float xfade_amount;
+  float algo;
+  float crossfade;
+};
+
 class SaturatingAmplifier {
  public:
   SaturatingAmplifier() { }
@@ -156,11 +165,22 @@ class Modulator {
   // void ProcessVocoder(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessBitcrusher(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size);
-  void ProcessDoppler(ShortFrame* input, ShortFrame* output, size_t size);
+  void ProcessDreamyMixer(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessCrushMixer(ShortFrame* input, ShortFrame* output, size_t size);
+  void ProcessRadioMixer(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t size);
   void ProcessMeta(ShortFrame* input, ShortFrame* output, size_t size);
+
+  // Shared mixer helpers
+  inline void MixerPrepareInputs(ShortFrame* input, size_t size);
+  inline MixerFrame MixerComputeFrame(
+      float x_1, float x_2, float crossfade, float algo);
+  inline void MixerWriteOutput(
+      ShortFrame* output, const MixerFrame& f,
+      float processed_A, float processed_B);
+  inline void MixerFinalize();
+
   inline Parameters* mutable_parameters() { return &parameters_; }
   inline const Parameters& parameters() { return parameters_; }
   
@@ -318,15 +338,29 @@ class Modulator {
   stmlib::OnePole filter_[8];
 
   // Tape effect delay buffer
-  static const int kSharedDelaySize = 12288;
+  static const int kSharedDelaySize = 12264;  // 12288 - 24 to fit radio mixer + crush saturation in RAM
   int32_t shared_write_pos_;
+  bool drift_decimation_active_;
+  uint8_t drift_decimate_counter_;
   stmlib::OnePole tape_lp_l_; // Low-pass filter for tape effect (left)
   stmlib::OnePole tape_lp_r_; // Low-pass filter for tape effect (right)
 
   stmlib::Svf lossy_bpf_l_;
   stmlib::Svf lossy_bpf_r_;
 
-  ShortFrame delay_buffer_[8192+4096];
+  // Radio mixer state
+  float radio_carrier_phase_;
+  float radio_fade_lfo_phase_;
+  float radio_static_lp_;
+
+  // VHS pre-computed dropout params (hoisted from per-sample loop)
+  float vhs_age_mid_;
+  float vhs_age_chewed_;
+  float vhs_dropout_base_chance_;
+  float vhs_dropout_max_length_;
+  float vhs_dropout_gain_min_;
+
+  ShortFrame delay_buffer_[12264];
   float internal_modulation_[kMaxBlockSize];
   float buffer_[3][kMaxBlockSize];
   float src_buffer_[2][kMaxBlockSize * kOversampling];

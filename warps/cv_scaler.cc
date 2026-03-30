@@ -143,7 +143,11 @@ void CvScaler::Read(Parameters* p) {
 
   float raw_algorithm = lp_state_[ADC_ALGORITHM_POT] + raw_algorithm_cv * 2.0f;
   CONSTRAIN(raw_algorithm, 0.0f, 1.0f);
-  p->raw_algorithm = raw_algorithm;
+  if (p->algorithm_frozen) {
+    p->raw_algorithm = p->frozen_algorithm;
+  } else {
+    p->raw_algorithm = raw_algorithm;
+  }
 
   float level_1_pot = lp_state_[ADC_LEVEL_1_POT];
   float level_1_cv = calibration_data_->offset[ADC_LEVEL_1_CV] - lp_state_[ADC_LEVEL_1_CV];
