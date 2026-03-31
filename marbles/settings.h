@@ -64,6 +64,13 @@ enum DejaVuState {
   DEJA_VU_LOCKED
 };
 
+enum XRegisterMode {
+  X_REGISTER_MODE_OFF = 0,
+  X_REGISTER_MODE_REGISTER = 1,
+  X_REGISTER_MODE_VOCT_OFFSET = 2,
+  X_REGISTER_MODE_LAST = 3
+};
+
 struct State {
   uint8_t t_deja_vu;
   uint8_t t_model;
@@ -81,9 +88,9 @@ struct State {
   uint8_t y_divider;
   uint8_t y_range;
 
-  uint8_t grids_x;
-  uint8_t grids_y;
-  uint8_t grids_chaos;
+  uint8_t x_steps_alt;
+  uint8_t x_bias_alt;
+  uint8_t x_spread_alt;
   uint8_t t_rate_stored;
   uint8_t grids_hh_density;
 
@@ -106,8 +113,9 @@ struct State {
   uint8_t grids_accent_hang;
   uint8_t grids_sync_playheads;
   uint8_t grids_loop_start_at_one;
+  uint8_t grids_knob_swap;
 
-  uint8_t padding[11];  // Reserve space for future fields (48 bytes total)
+  uint8_t padding[10];  // Reserve space for future fields (48 bytes total)
 
   enum { tag = 0x54415453 };
 };
@@ -183,6 +191,10 @@ class Settings {
 
   inline uint8_t grids_chaos_cv_swap() const {
     return state_.grids_chaos_cv_swap;
+  }
+
+  inline bool grids_knob_swap() const {
+    return state_.grids_knob_swap;
   }
 
   inline bool deja_vu_t_cv_swap() const {

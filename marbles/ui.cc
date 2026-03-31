@@ -147,9 +147,9 @@ void Ui::Poll() {
 
   if (s->t_model == marbles::T_GENERATOR_MODEL_GRIDS) {
     // GRIDS MODE: Remap Shift-Knobs to Grids Variables
-    alternate_knob_mappings_[ADC_CHANNEL_X_STEPS].destination = &s->grids_x;
-    alternate_knob_mappings_[ADC_CHANNEL_X_BIAS].destination  = &s->grids_y;
-    alternate_knob_mappings_[ADC_CHANNEL_X_SPREAD].destination = &s->grids_chaos;
+    alternate_knob_mappings_[ADC_CHANNEL_X_STEPS].destination = &s->x_steps_alt;
+    alternate_knob_mappings_[ADC_CHANNEL_X_BIAS].destination  = &s->x_bias_alt;
+    alternate_knob_mappings_[ADC_CHANNEL_X_SPREAD].destination = &s->x_spread_alt;
     alternate_knob_mappings_[ADC_CHANNEL_T_RATE].destination   = &s->t_rate_stored;
     alternate_knob_mappings_[ADC_CHANNEL_DEJA_VU_AMOUNT].destination = &s->grids_accent_threshold;
     alternate_knob_mappings_[ADC_CHANNEL_DEJA_VU_LENGTH].destination = &s->grids_accent_variation;
@@ -305,6 +305,7 @@ void Ui::UpdateLEDs() {
           leds_.set(LED_X_DEJA_VU, state.grids_loop_start_at_one ? LED_COLOR_GREEN : LED_COLOR_OFF);
 
           leds_.set(LED_X_CONTROL_MODE, state.explicit_reset ? LED_COLOR_YELLOW : LED_COLOR_OFF);
+          leds_.set(LED_X_RANGE, state.grids_knob_swap ? LED_COLOR_GREEN : LED_COLOR_OFF);
         } else if (settings_->state().t_model == T_GENERATOR_MODEL_GRIDS &&
             switches_.pressed(SWITCH_X_MODE) && grids_held_first == SWITCH_X_MODE) {
 
@@ -351,11 +352,16 @@ void Ui::UpdateLEDs() {
           leds_.set(LED_T_RANGE, MakeColor(state.t_range, cb));
           if (mode_ == UI_MODE_NORMAL) {
             leds_.set(LED_X_RANGE,
-                      state.x_register_mode
+                      state.x_register_mode == X_REGISTER_MODE_REGISTER
                           ? LED_COLOR_OFF
                           : MakeColor(state.x_range, cb));
-            leds_.set(LED_X_EXT,
-                      state.x_register_mode ? LED_COLOR_GREEN : LED_COLOR_OFF);
+            LedColor x_ext_color = LED_COLOR_OFF;
+            if (state.x_register_mode == X_REGISTER_MODE_REGISTER) {
+              x_ext_color = LED_COLOR_GREEN;
+            } else if (state.x_register_mode == X_REGISTER_MODE_VOCT_OFFSET) {
+              x_ext_color = slow_blink ? LED_COLOR_GREEN : LED_COLOR_OFF;
+            }
+            leds_.set(LED_X_EXT, x_ext_color);
           } else {
             leds_.set(LED_X_RANGE, scale_color);
             leds_.set(LED_X_EXT, LED_COLOR_GREEN);
@@ -568,6 +574,20 @@ void Ui::OnSwitchReleased(const Event& e) {
       grids_save_flag_ = true;
       return;
     }
+    if (e.control_id == SWITCH_X_RANGE) {
+      ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_RANGE] = true;
+      // Capture current knob positions into alt fields before swapping
+      // (the fields switch meaning, so initialize with current ADC values)
+      state->x_steps_alt = static_cast<uint8_t>(
+          cv_reader_->channel(ADC_CHANNEL_X_STEPS).unscaled_pot() * 255.0f);
+      state->x_bias_alt = static_cast<uint8_t>(
+          cv_reader_->channel(ADC_CHANNEL_X_BIAS).unscaled_pot() * 255.0f);
+      state->x_spread_alt = static_cast<uint8_t>(
+          cv_reader_->channel(ADC_CHANNEL_X_SPREAD).unscaled_pot() * 255.0f);
+      state->grids_knob_swap = !state->grids_knob_swap;
+      grids_save_flag_ = true;
+      return;
+    }
   }
 
   switch (e.control_id) {
@@ -656,7 +676,7 @@ void Ui::OnSwitchReleased(const Event& e) {
         mode_ = UI_MODE_RECORD_SCALE;
         scale_recorder_->Clear();
       } else {
-        state->x_register_mode = !state->x_register_mode;
+        state->x_register_mode = (state->x_register_mode + 1) % X_REGISTER_MODE_LAST;
         SaveState();
       }
       break;
@@ -671,7 +691,7 @@ void Ui::OnSwitchReleased(const Event& e) {
       } else if (mode_ == UI_MODE_SELECT_SCALE) {
         state->x_scale = (state->x_scale + 1) % kNumScales;
       } else {
-        if (!state->x_register_mode) {
+        if (state->x_register_mode != X_REGISTER_MODE_REGISTER) {
           state->x_range = (state->x_range + 1) % 3;
         }
       }

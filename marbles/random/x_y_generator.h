@@ -73,6 +73,7 @@ struct GroupSettings {
   ControlMode control_mode;
   VoltageRange voltage_range;
   bool register_mode;
+  bool use_shift_register;
   float register_value;
   float spread;
   float bias;

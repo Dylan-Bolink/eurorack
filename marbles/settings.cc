@@ -205,11 +205,12 @@ void Settings::Init() {
   state_.grids_accent_hang = 0;
   state_.grids_sync_playheads = 0;
   state_.grids_loop_start_at_one = 0;
+  state_.grids_knob_swap = 0;
 
   state_.t_rate_stored = 128;
-  state_.grids_x = 0;
-  state_.grids_y = 0;
-  state_.grids_chaos = 128;
+  state_.x_steps_alt = 0;
+  state_.x_bias_alt = 0;
+  state_.x_spread_alt = 128;
   state_.grids_swing = 128;
   state_.grids_hh_density = 128;
   state_.grids_accent_threshold = 128;
@@ -240,6 +241,7 @@ void Settings::Init() {
     CONSTRAIN(state_.grids_accent_hang, 0, 1);
     CONSTRAIN(state_.grids_sync_playheads, 0, 1);
     CONSTRAIN(state_.grids_loop_start_at_one, 0, 1);
+    CONSTRAIN(state_.grids_knob_swap, 0, 1);
     CONSTRAIN(state_.grids_x_cv_swap, 0, 2);
     CONSTRAIN(state_.grids_y_cv_swap, 0, 2);
     CONSTRAIN(state_.grids_chaos_cv_swap, 0, 2);

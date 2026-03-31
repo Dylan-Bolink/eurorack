@@ -180,7 +180,7 @@ void XYGenerator::Process(
     if (clock_source != CLOCK_SOURCE_INTERNAL_T1_T2_T3
         && i > 0 && i < kNumXChannels) {
       sequence = &random_sequence_[0];
-      if (settings.register_mode) {
+      if (settings.use_shift_register) {
         use_shifted_sequences = true;
 
         if (settings.control_mode == CONTROL_MODE_IDENTICAL) {
