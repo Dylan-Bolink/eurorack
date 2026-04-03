@@ -351,17 +351,40 @@ void Ui::UpdateLEDs() {
         } else {
           leds_.set(LED_T_RANGE, MakeColor(state.t_range, cb));
           if (mode_ == UI_MODE_NORMAL) {
-            leds_.set(LED_X_RANGE,
-                      state.x_register_mode == X_REGISTER_MODE_REGISTER
-                          ? LED_COLOR_OFF
-                          : MakeColor(state.x_range, cb));
-            LedColor x_ext_color = LED_COLOR_OFF;
-            if (state.x_register_mode == X_REGISTER_MODE_REGISTER) {
-              x_ext_color = LED_COLOR_GREEN;
-            } else if (state.x_register_mode == X_REGISTER_MODE_VOCT_OFFSET) {
-              x_ext_color = slow_blink ? LED_COLOR_GREEN : LED_COLOR_OFF;
+            if (state.x_control_mode == 5) {  // CONTROL_MODE_CHORD
+              if (state.x_scale >= 6) {
+                leds_.set(LED_X_RANGE, LED_COLOR_OFF);  // chromatic
+              } else {
+                leds_.set(LED_X_RANGE, scale_color);
+              }
+            } else {
+              leds_.set(LED_X_RANGE,
+                        state.x_register_mode == X_REGISTER_MODE_REGISTER
+                            ? LED_COLOR_OFF
+                            : MakeColor(state.x_range, cb));
             }
-            leds_.set(LED_X_EXT, x_ext_color);
+            if (state.x_control_mode == 5) {  // CONTROL_MODE_CHORD only (inversion via x_range)
+              int inv = state.x_range;
+              if (inv == 0) {
+                leds_.set(LED_X_EXT, LED_COLOR_OFF);
+              } else {
+                uint32_t phase = system_clock.milliseconds() % 1000;
+                bool led_on = false;
+                for (int b = 0; b < inv; b++) {
+                  uint32_t start = b * 200;
+                  if (phase >= start && phase < start + 100) led_on = true;
+                }
+                leds_.set(LED_X_EXT, led_on ? LED_COLOR_GREEN : LED_COLOR_OFF);
+              }
+            } else {
+              LedColor x_ext_color = LED_COLOR_OFF;
+              if (state.x_register_mode == X_REGISTER_MODE_REGISTER) {
+                x_ext_color = LED_COLOR_GREEN;
+              } else if (state.x_register_mode == X_REGISTER_MODE_VOCT_OFFSET) {
+                x_ext_color = slow_blink ? LED_COLOR_GREEN : LED_COLOR_OFF;
+              }
+              leds_.set(LED_X_EXT, x_ext_color);
+            }
           } else {
             leds_.set(LED_X_RANGE, scale_color);
             leds_.set(LED_X_EXT, LED_COLOR_GREEN);
@@ -652,7 +675,10 @@ void Ui::OnSwitchReleased(const Event& e) {
     case SWITCH_X_MODE:
       // In Grids mode, only cycle on short tap
       if (state->t_model != T_GENERATOR_MODEL_GRIDS || e.data < 275) {
-        state->x_control_mode = (state->x_control_mode + 1) % 3;
+        state->x_control_mode = (state->x_control_mode + 1) % 6;
+        if (state->x_control_mode != 4 && state->x_control_mode != 5 && state->x_scale > 5) {
+          state->x_scale = 5;  // clamp chromatic back to last preset
+        }
         SaveState();
       }
       break;
@@ -676,7 +702,11 @@ void Ui::OnSwitchReleased(const Event& e) {
         mode_ = UI_MODE_RECORD_SCALE;
         scale_recorder_->Clear();
       } else {
-        state->x_register_mode = (state->x_register_mode + 1) % X_REGISTER_MODE_LAST;
+        if (state->x_control_mode == 5) {  // CONTROL_MODE_CHORD only
+          state->x_range = (state->x_range + 1) % 4;  // inversion 0-3
+        } else {
+          state->x_register_mode = (state->x_register_mode + 1) % X_REGISTER_MODE_LAST;
+        }
         SaveState();
       }
       break;
@@ -684,6 +714,10 @@ void Ui::OnSwitchReleased(const Event& e) {
     case SWITCH_X_RANGE:
       if (mode_ >= UI_MODE_CALIBRATION_1 && mode_ <= UI_MODE_CALIBRATION_4) {
         NextCalibrationStep();
+      } else if (state->x_control_mode == 5) {  // CONTROL_MODE_CHORD
+        if (e.data < kLongPressDuration) {
+          state->x_scale = (state->x_scale + 1) % 7;  // 0-5 scales, 6 chromatic
+        }
       } else if (e.data >= kLongPressDuration) {
         if (mode_ == UI_MODE_NORMAL) {
           mode_ = UI_MODE_SELECT_SCALE;

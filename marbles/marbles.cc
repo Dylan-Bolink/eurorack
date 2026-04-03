@@ -523,15 +523,26 @@ void Process(IOBuffer::Block* block, size_t size) {
     fill(&voltages[0], &voltages[4 * size], voltage);
   } else {
     x.control_mode = ControlMode(state.x_control_mode);
-    x.voltage_range = VoltageRange(state.x_range % 3);
-    bool is_register = (state.x_register_mode == X_REGISTER_MODE_REGISTER);
-    bool is_voct_offset = (state.x_register_mode == X_REGISTER_MODE_VOCT_OFFSET);
+    bool is_voct_offset = false;
 
-    x.register_mode = is_register;
-    x.use_shift_register = is_register || is_voct_offset;
-    x.register_value = u;
-    cv_reader.set_attenuverter(
-        ADC_CHANNEL_X_SPREAD, (is_register || is_voct_offset) ? 0.5f : 1.0f);
+    if (x.control_mode == CONTROL_MODE_CHORD) {
+      // Chord mode: inversion
+      x.voltage_range = VoltageRange(state.x_range);
+      x.register_mode = (xy_clock_source == CLOCK_SOURCE_EXTERNAL);
+      x.use_shift_register = x.register_mode;
+      x.register_value = u;
+      // Spread jack = 1:1 root input (bypass attenuverter)
+      cv_reader.set_attenuverter(ADC_CHANNEL_X_SPREAD, 0.5f);
+    } else {
+      x.voltage_range = VoltageRange(state.x_range % 3);
+      bool is_register = (state.x_register_mode == X_REGISTER_MODE_REGISTER);
+      is_voct_offset = (state.x_register_mode == X_REGISTER_MODE_VOCT_OFFSET);
+      x.register_mode = is_register;
+      x.use_shift_register = is_register || is_voct_offset;
+      x.register_value = u;
+      cv_reader.set_attenuverter(
+          ADC_CHANNEL_X_SPREAD, (is_register || is_voct_offset) ? 0.5f : 1.0f);
+    }
 
     if (grids_mode && state.grids_knob_swap) {
       // Swapped: X params from stored alt fields + CV from jacks
@@ -597,7 +608,9 @@ void Process(IOBuffer::Block* block, size_t size) {
     
     if (settings.dirty_scale_index() != -1) {
       int i = settings.dirty_scale_index();
-      xy_generator.LoadScale(i, settings.persistent_data().scale[i]);
+      if (i < kNumScales) {
+        xy_generator.LoadScale(i, settings.persistent_data().scale[i]);
+      }
       settings.set_dirty_scale_index(-1);
     }
     
@@ -640,7 +653,7 @@ void Process(IOBuffer::Block* block, size_t size) {
     block->cv_output[2][i] = DacCode(2, val_x2 + voct_offset); // X2
     block->cv_output[3][i] = DacCode(3, val_x3 + voct_offset); // X3
     
-    if (grids_mode) {
+    if (grids_mode && state.x_control_mode != CONTROL_MODE_CHORD) {
       float accent_voltage = 0.0f;
       bool current_accent = accent_cv_delay_tail[0];
       uint8_t variation = state.grids_accent_variation;
