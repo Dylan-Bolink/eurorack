@@ -178,12 +178,8 @@ void Ui::Poll() {
     if (switches_.pressed(Switch(i)) && !ignore_release_[i]) {
       int32_t pressed_time = system_clock.milliseconds() - press_time_[i];
       if (pressed_time > kLongPressDuration && !setting_modification_flag_) {
-        bool suppress = (i == SWITCH_T_MODEL &&
-            settings_->state().t_model >= T_GENERATOR_MODEL_GRIDS);
-        if (!suppress) {
-          queue_.AddEvent(CONTROL_SWITCH, i, pressed_time);
-          ignore_release_[i] = true;
-        }
+        queue_.AddEvent(CONTROL_SWITCH, i, pressed_time);
+        ignore_release_[i] = true;
       }
     }
     if (switches_.released(Switch(i)) && !ignore_release_[i]) {
@@ -651,7 +647,7 @@ void Ui::OnSwitchReleased(const Event& e) {
             state->t_model -= 3;
           }
         } else {
-          if (e.data >= kMediumPressDuration) {
+          if (e.data >= kLongPressDuration) {
             state->t_model += 3;
           } else {
             state->t_model = (state->t_model + 1) % 3;
@@ -676,6 +672,10 @@ void Ui::OnSwitchReleased(const Event& e) {
       // In Grids mode, only cycle on short tap
       if (state->t_model != T_GENERATOR_MODEL_GRIDS || e.data < 275) {
         state->x_control_mode = (state->x_control_mode + 1) % 6;
+
+        // skip dummy mode
+        if (state->x_control_mode == 4) state->x_control_mode = 5;
+        
         if (state->x_control_mode != 4 && state->x_control_mode != 5 && state->x_scale > 5) {
           state->x_scale = 5;  // clamp chromatic back to last preset
         }

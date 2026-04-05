@@ -101,6 +101,10 @@ class OutputChannel {
     scale_offset_ = scale_offset;
   }
   
+  inline void set_previous_phase(float phase) {
+    previous_phase_ = phase;
+  }
+  
   inline float Quantize(float voltage, float amount) {
     return quantizer_[scale_index_].Process(voltage, amount, false);
   }

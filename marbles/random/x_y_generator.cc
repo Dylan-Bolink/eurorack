@@ -150,6 +150,8 @@ void XYGenerator::Process(
 
   if (*reset) {
     ramp_divider_.Reset();
+    rr_counter_ = 0;
+    rr_prev_phase_ = 0.0f;
   }
   
   ramp_divider_.Process(y_settings.ratio, channel_ramp[1], ramps.external, size);
@@ -236,6 +238,12 @@ void XYGenerator::Process(
     
     if (x_settings.control_mode == CONTROL_MODE_CHORD && i < kNumXChannels) {
       // Chord mode: skip randomness
+    } else if (x_settings.control_mode == CONTROL_MODE_ROUND_ROBIN
+        && i < kNumXChannels
+        && i != static_cast<size_t>(rr_counter_)) {
+      for (size_t s = 0; s < size; s++) {
+        output[i + s * kNumChannels] = rr_held_[i];
+      }
     } else {
       channel.Process(sequence, channel_ramp[i], &output[i], size, kNumChannels);
     }
@@ -335,19 +343,22 @@ void XYGenerator::Process(
 
   if (x_settings.control_mode == CONTROL_MODE_ROUND_ROBIN) {
     const float* base_ramp = channel_ramp[0];
+    int active_channel = rr_counter_;
     for (size_t s = 0; s < size; s++) {
       float prev = (s == 0) ? rr_prev_phase_ : base_ramp[s - 1];
       if (base_ramp[s] < prev) {
-        rr_held_[rr_counter_] = output[s * kNumChannels + rr_counter_];
+        rr_held_[active_channel] = output[s * kNumChannels + active_channel];
         rr_counter_ = (rr_counter_ + 1) % static_cast<int>(kNumXChannels);
+        // Sync next channel's phase tracker to current ramp value to prevent
+        // spurious trigger on the first block it becomes active
+        output_channel_[rr_counter_].set_previous_phase(base_ramp[s]);
         break;
       }
     }
     rr_prev_phase_ = base_ramp[size - 1];
-    // Overwrite non-active channels with held values for the whole block
     for (size_t s = 0; s < size; s++) {
       for (int ch = 0; ch < static_cast<int>(kNumXChannels); ch++) {
-        if (ch != rr_counter_) {
+        if (ch != active_channel) {
           output[s * kNumChannels + ch] = rr_held_[ch];
         }
       }
