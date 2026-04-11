@@ -37,20 +37,36 @@ namespace marbles {
 using namespace std;
 using namespace stmlib;
 
-const int kChordNumChords = 8;
+const int kChordNumChords = 12;
 const int kChordNumNotes = 4;
 
-// 8 pure 7th chords (Harmonaig style), ordered minor<->major
+// 12 chords
 const float chords[kChordNumChords][kChordNumNotes] = {
   { 0.0f,  3.0f,  6.0f,  9.0f },   // dim7
-  { 0.0f,  3.0f,  6.0f, 10.0f },   // half-dim (m7b5)
+  { 0.0f,  3.0f,  6.0f, 10.0f },   // half-dim
   { 0.0f,  3.0f,  7.0f, 10.0f },   // m7
   { 0.0f,  3.0f,  7.0f, 11.0f },   // mMaj7
+  { 0.0f,  3.0f,  7.0f, 12.0f },   // min triad
+  { 0.0f,  5.0f,  7.0f, 10.0f },   // sus4
+  { 0.0f,  5.0f, 10.0f, 15.0f },   // quartal
+  { 0.0f,  2.0f,  7.0f, 14.0f },   // sus2
+  { 0.0f,  7.0f, 12.0f, 19.0f },   // power open fith
+  { 0.0f,  4.0f,  7.0f, 12.0f },   // maj triad
   { 0.0f,  4.0f,  7.0f, 10.0f },   // Dom7
   { 0.0f,  4.0f,  7.0f, 11.0f },   // Maj7
-  { 0.0f,  4.0f,  8.0f, 11.0f },   // augMaj7
-  { 0.0f,  4.0f,  8.0f, 10.0f },   // aug7
 };
+
+// 8 pure 7th chords (Harmonaig style), ordered minor<->major
+// const float chords[kChordNumChords][kChordNumNotes] = {
+//   { 0.0f,  3.0f,  6.0f,  9.0f },   // dim7
+//   { 0.0f,  3.0f,  6.0f, 10.0f },   // half-dim (m7b5)
+//   { 0.0f,  3.0f,  7.0f, 10.0f },   // m7
+//   { 0.0f,  3.0f,  7.0f, 11.0f },   // mMaj7
+//   { 0.0f,  4.0f,  7.0f, 10.0f },   // Dom7
+//   { 0.0f,  4.0f,  7.0f, 11.0f },   // Maj7
+//   { 0.0f,  4.0f,  8.0f, 11.0f },   // augMaj7
+//   { 0.0f,  4.0f,  8.0f, 10.0f },   // aug7
+// };
 
 
 void XYGenerator::Init(RandomStream* random_stream, float sr) {
@@ -251,93 +267,74 @@ void XYGenerator::Process(
 
   if (x_settings.control_mode == CONTROL_MODE_CHORD) {
     bool chromatic = (x_settings.scale_index > 5);
-    float transpose = (x_settings.bias - 0.5f) * 2.0f;
+    float spread_centered = x_settings.spread - 0.5f;
+    if (spread_centered > -0.05f && spread_centered < 0.05f) spread_centered = 0.0f;
+    float transpose = spread_centered * 2.0f;
 
     // Inversion 0-3 from X Range switch
     int inversion = static_cast<int>(x_settings.voltage_range);
     CONSTRAIN(inversion, 0, 3);
+
+    // Steps chord quality index
+    int chord_idx = static_cast<int>(x_settings.steps * (kChordNumChords - 1) + 0.5f);
+    CONSTRAIN(chord_idx, 0, kChordNumChords - 1);
 
     for (size_t s = 0; s < size; s++) {
       size_t base = s * kNumChannels;
 
       float root = 10.0f * (x_settings.register_value - 0.5f);
       root += transpose;
+      // root += 1.15f / 12.0f;  // compensate hardware ADC offset
 
+      // Build voices
+      float voices[3];
+      float base_interval;
       if (chromatic) {
-        // Chromatic fallback: fixed semitone intervals (minor triad + m7)
         root = roundf(root * 12.0f) / 12.0f;
-        output[base + 3] = root;
-        output[base + 0] = root + 3.0f / 12.0f;
-        output[base + 1] = root + 7.0f / 12.0f;
-        output[base + 2] = root + 10.0f / 12.0f;
+        base_interval = 1.0f;
+        for (int v = 0; v < 3; v++)
+          voices[v] = root + chords[chord_idx][v + 1] / 12.0f;
       } else {
-        const Scale& scale = stored_scales_[x_settings.scale_index];
+        base_interval = stored_scales_[x_settings.scale_index].base_interval;
         root = output_channel_[0].Quantize(root, 0.5f);
-
-        // Build filtered list of diatonic (high-weight) degrees
-        int diatonic_degrees[kMaxDegrees];
-        int num_diatonic = 0;
-        for (int d = 0; d < scale.num_degrees; d++) {
-          if (scale.degree[d].weight >= 16) diatonic_degrees[num_diatonic++] = d;
-        }
-        if (num_diatonic < 2) {
-          for (int d = 0; d < scale.num_degrees; d++) diatonic_degrees[num_diatonic++] = d;
-        }
-
-        // Steps → skip 1..num_diatonic-1 diatonic degrees per voice
-        int skip = static_cast<int>(x_settings.steps * (num_diatonic - 1) + 1.0f);
-        CONSTRAIN(skip, 1, num_diatonic - 1);
-
-        // Find root's octave and degree within its octave
-        float octave_f = floorf(root / scale.base_interval);
-        int octave = static_cast<int>(octave_f);
-        float root_in_octave = root - octave_f * scale.base_interval;
-
-        int root_deg = 0;
-        float min_dist = 1000.0f;
-        for (int d = 0; d < scale.num_degrees; d++) {
-          float dist = fabsf(scale.degree[d].voltage - root_in_octave);
-          if (dist < min_dist) { min_dist = dist; root_deg = d; }
-        }
-
-        // Find root's index within the diatonic list
-        int root_diatonic_idx = 0;
-        for (int i = 0; i < num_diatonic; i++) {
-          if (diatonic_degrees[i] == root_deg) { root_diatonic_idx = i; break; }
-        }
-        int abs_diatonic_root = octave * num_diatonic + root_diatonic_idx;
-
-        // Walk diatonic degrees to build voices (wraps across octaves)
-        float voices[3];
-        for (int v = 0; v < 3; v++) {
-          int abs_idx = abs_diatonic_root + skip * (v + 1);
-          int voct = abs_idx / num_diatonic;
-          int vidx = abs_idx % num_diatonic;
-          if (vidx < 0) { vidx += num_diatonic; voct--; }
-          voices[v] = scale.degree[diatonic_degrees[vidx]].voltage
-                    + static_cast<float>(voct) * scale.base_interval;
-        }
-
-        // Spread → octave displacement of upper voices
-        float spread_amount = x_settings.spread * 48.0f;
-        voices[1] += static_cast<float>(
-            static_cast<int>(roundf(spread_amount * 0.5f / 12.0f))) * scale.base_interval;
-        voices[2] += static_cast<float>(
-            static_cast<int>(roundf(spread_amount / 12.0f))) * scale.base_interval;
-
-        // Apply inversion: bump lowest voice up an octave, re-sort
-        for (int inv = 0; inv < inversion; inv++) {
-          voices[0] += scale.base_interval;
-          if (voices[0] > voices[1]) { float t = voices[0]; voices[0] = voices[1]; voices[1] = t; }
-          if (voices[1] > voices[2]) { float t = voices[1]; voices[1] = voices[2]; voices[2] = t; }
-          if (voices[0] > voices[1]) { float t = voices[0]; voices[0] = voices[1]; voices[1] = t; }
-        }
-
-        output[base + 3] = root;
-        output[base + 0] = voices[0];
-        output[base + 1] = voices[1];
-        output[base + 2] = voices[2];
+        for (int v = 0; v < 3; v++)
+          voices[v] = output_channel_[0].Quantize(root + chords[chord_idx][v + 1] / 12.0f, 0.5f);
       }
+
+      // Spread: CCW=closed, noon=closed, past noon=drop2, CW=open
+      int voicing = 0;
+      if (x_settings.bias > 0.75f) voicing = 3;      // open
+      else if (x_settings.bias > 0.5f) voicing = 1;  // drop2
+
+      switch (voicing) {
+        case 1: // Drop 2
+          voices[1] -= base_interval;
+          if (voices[1] < voices[0]) { float t = voices[0]; voices[0] = voices[1]; voices[1] = t; }
+          break;
+        case 2: // Drop 3
+          voices[0] -= base_interval;
+          break;
+        case 3: // Open: drop 2 + raise highest
+          voices[1] -= base_interval;
+          if (voices[1] < voices[0]) { float t = voices[0]; voices[0] = voices[1]; voices[1] = t; }
+          voices[2] += base_interval;
+          break;
+        default:
+          break;
+      }
+
+      // Apply inversion
+      for (int inv = 0; inv < inversion; inv++) {
+        voices[0] += base_interval;
+        if (voices[0] > voices[1]) { float t = voices[0]; voices[0] = voices[1]; voices[1] = t; }
+        if (voices[1] > voices[2]) { float t = voices[1]; voices[1] = voices[2]; voices[2] = t; }
+        if (voices[0] > voices[1]) { float t = voices[0]; voices[0] = voices[1]; voices[1] = t; }
+      }
+
+      output[base + 3] = root;
+      output[base + 0] = voices[0];
+      output[base + 1] = voices[1];
+      output[base + 2] = voices[2];
     }
   }
 
@@ -349,8 +346,7 @@ void XYGenerator::Process(
       if (base_ramp[s] < prev) {
         rr_held_[active_channel] = output[s * kNumChannels + active_channel];
         rr_counter_ = (rr_counter_ + 1) % static_cast<int>(kNumXChannels);
-        // Sync next channel's phase tracker to current ramp value to prevent
-        // spurious trigger on the first block it becomes active
+       
         output_channel_[rr_counter_].set_previous_phase(base_ramp[s]);
         break;
       }

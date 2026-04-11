@@ -495,8 +495,26 @@ void Process(IOBuffer::Block* block, size_t size) {
   // Generate voltages for X-section (40%).
   float note_cv_1 = cv_reader.channel(ADC_CHANNEL_X_SPREAD).scaled_raw_cv();
   float note_cv_2 = cv_reader.channel(ADC_CHANNEL_X_SPREAD_2).scaled_raw_cv();
-  float note_cv = 0.5f * (note_cv_1 + note_cv_2);
+  // In chord mode the spread jack is the 1:1 root input — don't mix in the
+  // Deja Vu Length channel (ADC_CHANNEL_X_SPREAD_2), which would add a knob offset.
+  float note_cv = (state.x_control_mode == CONTROL_MODE_CHORD)
+      ? note_cv_1
+      : 0.5f * (note_cv_1 + note_cv_2);
   float u = note_filter.Process(0.5f * (note_cv + 1.0f));
+
+  // V/Oct correction curve
+  static const float kVoctCorrectionTable[] = {
+    0.015f,  // u=0.000 -5.0V
+    0.136f,  // u=0.125 -3.75V
+    0.257f,  // u=0.250 -2.5V
+    0.378f,  // u=0.375 -1.25V
+    0.499f,  // u=0.500  0.0V
+    0.620f,  // u=0.625 +1.25V
+    0.741f,  // u=0.750 +2.5V
+    0.861f,  // u=0.875 +3.75V
+    0.982f,  // u=1.000 +5.0V
+  };
+  u = Interpolate(kVoctCorrectionTable, u, 8.0f);
 
   if (test_adc_noise) {
     static float note_lp = 0.0f;
