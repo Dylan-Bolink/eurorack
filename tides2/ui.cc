@@ -184,7 +184,7 @@ void Ui::OnSwitchReleased(const Event& e) {
     State* s = settings_->mutable_state();
     switch (e.control_id) {
       case SWITCH_MODE:
-        s->mode = (s->mode + 1) % 3;
+        s->mode = (s->mode + 1) % 4;
         break;
       case SWITCH_RANGE:
         s->range = (s->range + 1) % 3;

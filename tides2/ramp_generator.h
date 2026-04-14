@@ -44,6 +44,7 @@ enum RampMode {
   RAMP_MODE_AD,
   RAMP_MODE_LOOPING,
   RAMP_MODE_AR,
+  RAMP_MODE_MOD,
   RAMP_MODE_LAST
 };
 

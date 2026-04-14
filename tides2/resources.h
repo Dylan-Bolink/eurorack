@@ -42,6 +42,12 @@ namespace tides {
 
 typedef uint8_t ResourceId;
 
+extern const uint32_t lut_increments[];
+
+extern const uint8_t wt_lfo_waveforms[];
+
+extern const int16_t wav_integrated_waves[];
+
 extern const float* lookup_table_table[];
 
 extern const int16_t* lookup_table_i16_table[];
@@ -49,6 +55,7 @@ extern const int16_t* lookup_table_i16_table[];
 extern const float lut_sine[];
 extern const float lut_bipolar_fold[];
 extern const float lut_unipolar_fold[];
+extern const float lut_warps_bipolar_fold[];
 extern const int16_t lut_wavetable[];
 #define LUT_SINE 0
 #define LUT_SINE_SIZE 1281

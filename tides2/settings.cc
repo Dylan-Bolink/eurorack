@@ -86,7 +86,7 @@ bool Settings::Init() {
       FIX_OUTLIER(persistent_data_.dac_calibration[i].scale, -4032.9f);
       FIX_OUTLIER(persistent_data_.dac_calibration[i].offset, 32768.0f);
     }
-    CONSTRAIN(state_.mode, 0, 2);
+    CONSTRAIN(state_.mode, 0, 3);
     CONSTRAIN(state_.range, 0, 2);
     CONSTRAIN(state_.output_mode, 0, 3);
   }

@@ -43,7 +43,7 @@ const size_t kNumInputs = 2;
 const size_t kNumCvOutputs = 4;
 const size_t kNumParameters = 6;
 
-const float kSampleRate = 62500.0f;
+const float kSampleRate = 48000.0f; //62500.0f;
 
 struct Parameters {
   float fm;
@@ -52,6 +52,7 @@ struct Parameters {
   float slope;
   float smoothness;
   float shift;
+  float alt_frequency;
 };
 
 class IOBuffer {

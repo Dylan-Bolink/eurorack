@@ -71,6 +71,7 @@ class CvReader {
   CvAdc cv_adc_;
   PotsAdc pots_adc_;
   float note_lp_;
+  float alt_note_lp_;
   
   CvReaderChannel cv_reader_channel_[kNumParameters];
   

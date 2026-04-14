@@ -37,6 +37,9 @@
 #include "tides2/io_buffer.h"
 #include "tides2/poly_slope_generator.h"
 #include "tides2/ramp/ramp_extractor.h"
+#include "tides2/modulators/poly_lfo.h"
+#include "tides2/modulators/attractors.h"
+#include "tides2/modulators/wavetable_engine.h"
 #include "tides2/resources.h"
 #include "tides2/settings.h"
 #include "tides2/ui.h"
@@ -59,6 +62,9 @@ HysteresisQuantizer2 ratio_index_quantizer;
 IOBuffer io_buffer;
 PolySlopeGenerator poly_slope_generator;
 RampExtractor ramp_extractor;
+PolyLfo poly_lfo;
+Attractors attractors;
+WavetableEngine wavetable_engine;
 Settings settings;
 Ui ui;
 
@@ -144,7 +150,10 @@ void Process(IOBuffer::Block* block, size_t size) {
   const Range range = state.range < 2 ? RANGE_CONTROL : RANGE_AUDIO;
   const bool half_speed = output_mode >= OUTPUT_MODE_SLOPE_PHASE;
   float transposition = block->parameters.frequency + block->parameters.fm;
+  float alt_transposition = block->parameters.alt_frequency;
+  
   CONSTRAIN(transposition, -128.0f, 127.0f);
+  CONSTRAIN(alt_transposition, -128.0f, 127.0f);
   
   if (test_adc_noise) {
     static float note_lp = 0.0f;
@@ -192,9 +201,11 @@ void Process(IOBuffer::Block* block, size_t size) {
         block->input[1],
         ramp,
         size);
+       
     must_reset_ramp_extractor = false;
   } else {
     frequency = kRoot[state.range] * stmlib::SemitonesToRatio(transposition);
+
     if (half_speed) {
       frequency *= 2.0f;
     }
@@ -206,7 +217,8 @@ void Process(IOBuffer::Block* block, size_t size) {
     previous_output_mode = output_mode;
   }
 
-  poly_slope_generator.Render(
+  if (ramp_mode != RAMP_MODE_MOD) {
+    poly_slope_generator.Render(
       ramp_mode,
       output_mode,
       range,
@@ -219,20 +231,83 @@ void Process(IOBuffer::Block* block, size_t size) {
       !block->input_patched[0] && block->input_patched[1] ? ramp : NULL,
       out,
       size);
-  
-  if (half_speed) {
-    for (size_t i = 0; i < size; ++i) {
-      for (size_t j = 0; j < kNumCvOutputs; ++j) {
-        block->output[j][2 * i] = block->output[j][2 * i + 1] =
-            settings.dac_code(j, out[i].channel[j]);
+
+      if (half_speed) {
+        for (size_t i = 0; i < size; ++i) {
+          for (size_t j = 0; j < kNumCvOutputs; ++j) {
+            block->output[j][2 * i] = block->output[j][2 * i + 1] =
+                settings.dac_code(j, out[i].channel[j]);
+          }
+        }
+      } else {
+        for (size_t i = 0; i < size; ++i) {
+          for (size_t j = 0; j < kNumCvOutputs; ++j) {
+            block->output[j][i] = settings.dac_code(j, out[i].channel[j]);
+          }
+        }
       }
-    }
   } else {
-    for (size_t i = 0; i < size; ++i) {
-      for (size_t j = 0; j < kNumCvOutputs; ++j) {
-        block->output[j][i] = settings.dac_code(j, out[i].channel[j]);
+      switch (output_mode) {
+        case OUTPUT_MODE_GATES:
+        case OUTPUT_MODE_AMPLITUDE:
+          {
+            float g1_frequency = kRoot[state.range] * stmlib::SemitonesToRatio(transposition);
+            float g2_frequency = kRoot[state.range] * stmlib::SemitonesToRatio(alt_transposition);
+            bool g1_reset = block->input_patched[0] && (block->input[0][0] & stmlib::GATE_FLAG_HIGH);
+            bool g2_reset = block->input_patched[1] && (block->input[1][0] & stmlib::GATE_FLAG_HIGH);
+            attractors.Reset(g1_reset, g2_reset);
+            if (output_mode == OUTPUT_MODE_GATES) {
+              attractors.set_lorenz(block->parameters.slope);
+              attractors.set_rossler(block->parameters.smoothness);
+            } else {
+              attractors.set_thomas(block->parameters.slope);
+              attractors.set_chua(block->parameters.smoothness);
+            }
+            
+            attractors.set_gain(block->parameters.shift);
+            attractors.set_speed(state.range);
+
+            attractors.Process(g1_frequency, g2_frequency, static_cast<int>(output_mode));
+
+            for (size_t i = 0; i < size; ++i) {
+              for (size_t j = 0; j < kNumCvOutputs; ++j) {
+                block->output[j][i] = settings.dac_code(j, attractors.channels(j));
+              }
+            }
+          }
+          break;
+        case OUTPUT_MODE_SLOPE_PHASE:
+          {
+            poly_lfo.set_shape(block->parameters.shape);
+            poly_lfo.set_shape_spread(block->parameters.slope);
+            poly_lfo.set_spread(block->parameters.smoothness);
+            poly_lfo.set_coupling(block->parameters.shift);
+
+            poly_lfo.Render(frequency, out, block->input_patched[0] ? block->input[0] : no_gate, size);
+
+            for (size_t i = 0; i < size; ++i) {
+              for (size_t j = 0; j < kNumCvOutputs; ++j) {
+                block->output[j][2 * i] = block->output[j][2 * i + 1] =
+                    settings.dac_code(j, out[i].channel[j] / 32.0f);
+              }
+            }
+          }
+          break;
+        case OUTPUT_MODE_FREQUENCY:  
+          { 
+            wavetable_engine.Render(block->parameters, frequency, out, block->input_patched[0] ? block->input[0] : no_gate, size);
+            
+            for (size_t j = 0; j < kNumCvOutputs; ++j) {
+              for (size_t i = 0; i < size; ++i) {       
+                block->output[j][2 * i] = block->output[j][2 * i + 1] =
+                    settings.dac_code(j, out[i].channel[j]);
+              }
+            }
+          }
+          break;  
+        default:
+          break;
       }
-    }
   }
 }
 
@@ -264,6 +339,10 @@ void Init() {
   poly_slope_generator.Init();
   ratio_index_quantizer.Init(20, 0.05f, false);
   ramp_extractor.Init(kSampleRate, 40.0f / kSampleRate);
+  poly_lfo.Init();
+  attractors.Init();
+  wavetable_engine.Init();
+  
   std::fill(&no_gate[0], &no_gate[kBlockSize], GATE_FLAG_LOW);
 
   sys.StartTimers();

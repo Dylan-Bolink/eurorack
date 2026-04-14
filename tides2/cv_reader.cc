@@ -47,6 +47,7 @@ void CvReader::Init(Settings* settings) {
   }
   
   note_lp_ = 0.0f;
+  alt_note_lp_ = 0.0f;
 }
 
 float kShapeBreakpoints[] = {
@@ -128,6 +129,24 @@ void CvReader::Read(IOBuffer::Block* block) {
         1.0f);
   }
   
+  float alt_note = cv_reader_channel_[2].Process<true, true>(
+      CenterDetent(pots_adc_.float_value(POTS_ADC_CHANNEL_POT_SHAPE)),
+      96.0f,
+      -48.0f,
+      0.003f,
+  
+      cv_adc_.float_value(CV_ADC_CHANNEL_SHAPE),
+      settings_->adc_calibration_data(2).scale,
+      settings_->adc_calibration_data(2).offset,
+      0.2f,
+  
+      pots_adc_.float_value(PotsAdcChannel(POTS_ADC_CHANNEL_ATTENUVERTER_SHAPE)),
+  
+      -96.0f,
+      +96.0f);
+  ONE_POLE(alt_note_lp_, alt_note, 0.2f);
+  block->parameters.alt_frequency = alt_note_lp_; 
+
   cv_adc_.Convert();
   pots_adc_.Convert();
 }

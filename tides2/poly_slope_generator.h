@@ -93,7 +93,8 @@ class PolySlopeGenerator {
   };
   
   void Reset() {
-    filter_.Init();
+    std::fill(&lp_1_[0], &lp_1_[num_channels], 0.0f);
+    std::fill(&lp_2_[0], &lp_2_[num_channels], 0.0f);
   }
   
   void Init() {
@@ -108,9 +109,10 @@ class PolySlopeGenerator {
       ramp_shaper_[i].Init();
       ramp_waveshaper_[i].Init();
     }
-    filter_.Init();
     
     ratio_index_quantizer_.Init(21, 0.05f, false);
+    std::fill(&lp_1_[0], &lp_1_[num_channels], 0.0f);
+    std::fill(&lp_2_[0], &lp_2_[num_channels], 0.0f);
     
     // Force template instantiation for all combinations of settings.
     INSTANTIATE(RAMP_MODE_AD, OUTPUT_MODE_GATES, RANGE_CONTROL);
@@ -206,13 +208,13 @@ class PolySlopeGenerator {
         f[i] += (1.0f - f[i]) * ratio;
       }
       if (output_mode == OUTPUT_MODE_GATES) {
-        filter_.Process<1>(f, &out[0].channel[0], size);
+        Filter(f, out, 1, size);
       } else {
-        filter_.Process<num_channels>(f, &out[0].channel[0], size);
+        Filter(f, out, num_channels, size);
       }
     }
   }
-  
+
  private:
   template<RampMode ramp_mode, OutputMode output_mode, Range range>
   inline void RenderInternal(
@@ -227,7 +229,7 @@ class PolySlopeGenerator {
       size_t size) {
     const bool is_phasor = !(range == RANGE_AUDIO && \
         ramp_mode == RAMP_MODE_LOOPING);
-
+    
     stmlib::ParameterInterpolator fm(&frequency_, frequency, size);
     stmlib::ParameterInterpolator pwm(&pw_, pw, size);
     stmlib::ParameterInterpolator shift_modulation(
@@ -293,10 +295,9 @@ class PolySlopeGenerator {
               ramp_mode>(raw, shape_table, shape_fractional);
 
         out[i].channel[0] = Fold<ramp_mode>(slope, fold) * shift;
-        out[i].channel[1] = Scale<ramp_mode>(is_phasor
-            ? ramp_waveshaper_[1].Shape<ramp_mode>(
-                raw, &lut_wavetable[8200], 0.0f)
-            : raw);
+        out[i].channel[1] = Fold<RAMP_MODE_MOD>(slope, fold) * shift;/*Scale<ramp_mode>(
+          is_phasor ? ramp_waveshaper_[1].Shape<ramp_mode>(raw, &lut_wavetable[8200], 0.0f) : raw
+        );*/
         out[i].channel[2] = ramp_shaper_[2].EOA<ramp_mode, range>(
             phase, frequency, pw) * 8.0f;
         out[i].channel[3] = ramp_shaper_[3].EOR<ramp_mode, range>(
@@ -350,7 +351,7 @@ class PolySlopeGenerator {
       }
     }
   }
-  
+
   template<RampMode ramp_mode, OutputMode output_mode, Range range>
   void IN_RAM RenderInternal_RAM(
       float frequency,
@@ -384,6 +385,16 @@ class PolySlopeGenerator {
     }
   }
   
+  inline void Filter(float* f, PolySlopeGenerator::OutputSample* out, size_t channels, size_t size) {
+    for (size_t s = 0; s < size; s++) {
+      for (size_t i = 0; i < channels; ++i) {
+        ONE_POLE(lp_1_[i], out[s].channel[i], f[i]);
+        ONE_POLE(lp_2_[i], lp_1_[i], f[i]);
+        out[s].channel[i] = lp_2_[i];
+      }
+    }
+  }
+
   template<RampMode ramp_mode>
   inline float Scale(float unipolar) {
     if (ramp_mode == RAMP_MODE_LOOPING) {
@@ -406,6 +417,8 @@ class PolySlopeGenerator {
   float shift_;
   float shape_;
   float fold_;
+  float lp_1_[num_channels];
+  float lp_2_[num_channels];
   
   stmlib::HysteresisQuantizer2 ratio_index_quantizer_;
 
@@ -413,7 +426,6 @@ class PolySlopeGenerator {
 
   RampShaper ramp_shaper_[num_channels];
   RampWaveshaper ramp_waveshaper_[num_channels];
-  Filter<num_channels> filter_;
   
   static Ratio audio_ratio_table_[21][num_channels];
   static Ratio control_ratio_table_[21][num_channels];
