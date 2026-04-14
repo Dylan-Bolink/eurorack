@@ -52,7 +52,6 @@ enum UiMode {
   UI_MODE_CALIBRATION_2,
   UI_MODE_CALIBRATION_3,
   UI_MODE_CALIBRATION_4,
-  UI_MODE_DISPLAY_RESET_MODE,
   UI_MODE_PANIC,
 };
 
@@ -138,6 +137,7 @@ class Ui {
   bool setting_modification_flag_;
   bool grids_save_flag_;
   bool deja_vu_lock_;
+  uint32_t explicit_reset_flash_time_;
   
   bool output_test_mode_;
   uint16_t output_test_forced_dac_code_[4];

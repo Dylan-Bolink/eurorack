@@ -318,7 +318,7 @@ void Process(IOBuffer::Block* block, size_t size) {
 
   // Disable if grids_y_cv_swap == 2 (jitter CV goes to map Y)
   bool t_reset_cv_available = !(grids_mode && settings.grids_y_cv_swap() == 2);
-  bool t_section_reset = settings.explicit_reset() && t_reset_cv_available &&
+  bool t_section_reset = (settings.explicit_reset() & 1) && t_reset_cv_available &&
       hidden_gates[ADC_CHANNEL_T_JITTER] & GATE_FLAG_RISING;
   
   t_generator.set_model(TGeneratorModel(state.t_model));
@@ -503,18 +503,20 @@ void Process(IOBuffer::Block* block, size_t size) {
   float u = note_filter.Process(0.5f * (note_cv + 1.0f));
 
   // V/Oct correction curve
-  static const float kVoctCorrectionTable[] = {
-    0.015f,  // u=0.000 -5.0V
-    0.136f,  // u=0.125 -3.75V
-    0.257f,  // u=0.250 -2.5V
-    0.378f,  // u=0.375 -1.25V
-    0.499f,  // u=0.500  0.0V
-    0.620f,  // u=0.625 +1.25V
-    0.741f,  // u=0.750 +2.5V
-    0.861f,  // u=0.875 +3.75V
-    0.982f,  // u=1.000 +5.0V
-  };
-  u = Interpolate(kVoctCorrectionTable, u, 8.0f);
+  if (state.x_register_mode == X_REGISTER_MODE_VOCT_OFFSET) {
+    static const float kVoctCorrectionTable[] = {
+      0.015f,  // u=0.000 -5.0V
+      0.136f,  // u=0.125 -3.75V
+      0.257f,  // u=0.250 -2.5V
+      0.378f,  // u=0.375 -1.25V
+      0.499f,  // u=0.500  0.0V
+      0.620f,  // u=0.625 +1.25V
+      0.741f,  // u=0.750 +2.5V
+      0.861f,  // u=0.875 +3.75V
+      0.982f,  // u=1.000 +5.0V
+    };
+    u = Interpolate(kVoctCorrectionTable, u, 8.0f);
+  }
 
   if (test_adc_noise) {
     static float note_lp = 0.0f;
@@ -635,7 +637,7 @@ void Process(IOBuffer::Block* block, size_t size) {
     y.scale_index = x.scale_index = state.x_scale;
     
     bool x_reset_cv_available = !(grids_mode && settings.grids_x_cv_swap() == 1);
-    bool x_section_reset = settings.explicit_reset() && x_reset_cv_available &&
+    bool x_section_reset = (settings.explicit_reset() & 2) && x_reset_cv_available &&
       hidden_gates[ADC_CHANNEL_X_STEPS] & GATE_FLAG_RISING;
     if (xy_clock_source != CLOCK_SOURCE_EXTERNAL) {
       x_section_reset |= t_section_reset;

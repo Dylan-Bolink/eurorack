@@ -173,7 +173,7 @@ class Settings {
     return dirty_scale_index_;
   }
   
-  inline bool explicit_reset() const {
+  inline uint8_t explicit_reset() const {
     return state_.explicit_reset;
   }
 

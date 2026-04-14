@@ -103,6 +103,7 @@ void Ui::Init(
   setting_modification_flag_ = false;
   grids_save_flag_ = false;
   output_test_mode_ = false;
+  explicit_reset_flash_time_ = 0;
   
   if (switches_.pressed_immediate(SWITCH_X_MODE)) {
     if (state->color_blind == 1) {
@@ -300,7 +301,12 @@ void Ui::UpdateLEDs() {
           leds_.set(LED_T_DEJA_VU, state.grids_sync_playheads ? LED_COLOR_GREEN : LED_COLOR_OFF);
           leds_.set(LED_X_DEJA_VU, state.grids_loop_start_at_one ? LED_COLOR_GREEN : LED_COLOR_OFF);
 
-          leds_.set(LED_X_CONTROL_MODE, state.explicit_reset ? LED_COLOR_YELLOW : LED_COLOR_OFF);
+          {
+            static const LedColor er_colors[] = {
+                LED_COLOR_OFF, LED_COLOR_GREEN, LED_COLOR_YELLOW, LED_COLOR_RED
+            };
+            leds_.set(LED_X_CONTROL_MODE, er_colors[state.explicit_reset]);
+          }
           leds_.set(LED_X_RANGE, state.grids_knob_swap ? LED_COLOR_GREEN : LED_COLOR_OFF);
         } else if (settings_->state().t_model == T_GENERATOR_MODEL_GRIDS &&
             switches_.pressed(SWITCH_X_MODE) && grids_held_first == SWITCH_X_MODE) {
@@ -450,14 +456,20 @@ void Ui::UpdateLEDs() {
       leds_.set(LED_X_RANGE, blink ? LED_COLOR_RED : LED_COLOR_OFF);
       break;
       
-    case UI_MODE_DISPLAY_RESET_MODE:
-      {
-        const bool l = blink && state.explicit_reset;
-        leds_.set(LED_T_MODEL, l ? LED_COLOR_YELLOW : LED_COLOR_OFF);
-        leds_.set(LED_X_CONTROL_MODE, l ? LED_COLOR_YELLOW : LED_COLOR_OFF);
-      }
-      break;
   }
+
+  // Explicit reset animmation which side.
+  if (mode_ == UI_MODE_NORMAL && explicit_reset_flash_time_ != 0) {
+    uint32_t elapsed = system_clock.milliseconds() - explicit_reset_flash_time_;
+    if (elapsed < 1000) {
+      uint8_t er = settings_->state().explicit_reset;
+      if (er & 1) leds_.set(LED_T_DEJA_VU, fast_blink ? LED_COLOR_GREEN : LED_COLOR_OFF);
+      if (er & 2) leds_.set(LED_X_DEJA_VU, fast_blink ? LED_COLOR_GREEN : LED_COLOR_OFF);
+    } else {
+      explicit_reset_flash_time_ = 0;
+    }
+  }
+
   leds_.Write();
 }
 
@@ -545,14 +557,15 @@ void Ui::OnSwitchReleased(const Event& e) {
     }
   }
 
-  // X pressed while T held > Toggle explicit reset
+  // cycle explicit reset.
   if (e.control_id == SWITCH_X_MODE && switches_.pressed(SWITCH_T_MODEL)) {
     bool is_grids = state->t_model >= T_GENERATOR_MODEL_GRIDS;
     if (!is_grids || grids_held_first == SWITCH_T_MODEL) {
       ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_MODE] = true;
-      state->explicit_reset = !state->explicit_reset;
+      state->explicit_reset = (state->explicit_reset + 1) % 4;
+      uint32_t ms = system_clock.milliseconds();
+      explicit_reset_flash_time_ = (ms == 0) ? 1 : ms;
       if (!is_grids) {
-        mode_ = UI_MODE_DISPLAY_RESET_MODE;
         SaveState();
       } else {
         grids_save_flag_ = true;
@@ -589,7 +602,9 @@ void Ui::OnSwitchReleased(const Event& e) {
     }
     if (e.control_id == SWITCH_X_MODE) {
       ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_MODE] = true;
-      state->explicit_reset = !state->explicit_reset;
+      state->explicit_reset = (state->explicit_reset + 1) % 4;
+      uint32_t ms = system_clock.milliseconds();
+      explicit_reset_flash_time_ = (ms == 0) ? 1 : ms;
       grids_save_flag_ = true;
       return;
     }
@@ -862,7 +877,7 @@ void Ui::DoEvents() {
   if (queue_.idle_time() > 800 && mode_ == UI_MODE_PANIC) {
     mode_ = UI_MODE_NORMAL;
   }
-  if (mode_ == UI_MODE_SELECT_SCALE || mode_ == UI_MODE_DISPLAY_RESET_MODE) {
+  if (mode_ == UI_MODE_SELECT_SCALE) {
     if (queue_.idle_time() > 4000) {
       mode_ = UI_MODE_NORMAL;
       queue_.Touch();
