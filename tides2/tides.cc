@@ -324,7 +324,7 @@ void Init() {
   
   previous_output_mode = OutputMode(settings.state().output_mode);
 
-  ui.Init(&settings, &factory_test);
+  ui.Init(&settings, &factory_test, &cv_reader);
   factory_test.Init(&settings, &cv_reader, &gate_inputs, &ui.switches());
 
   if (freshly_baked && !skip_factory_test) {

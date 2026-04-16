@@ -71,6 +71,7 @@ inline float InterpolateWaveCubic(const uint8_t* table, int32_t index_integral, 
     return ((c3 * index_fractional + c2) * index_fractional + c1) * index_fractional + c0;
 }
 
+extern const uint8_t wt_lfo_waveforms[];
 #define WAVE(wave) &wt_lfo_waveforms[wave * 257]
 
 const uint8_t* const wavetable[] = {

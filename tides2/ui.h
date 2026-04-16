@@ -36,6 +36,7 @@
 #include "tides2/drivers/leds.h"
 #include "tides2/drivers/switches.h"
 
+#include "tides2/cv_reader.h"
 #include "tides2/settings.h"
 
 namespace tides {
@@ -54,7 +55,7 @@ class Ui {
   Ui() { }
   ~Ui() { }
   
-  void Init(Settings* settings, FactoryTest* factory_test);
+  void Init(Settings* settings, FactoryTest* factory_test, CvReader* cv_reader);
   void Poll();
   void DoEvents();
   
@@ -79,7 +80,8 @@ class Ui {
   
   Settings* settings_;
   FactoryTest* factory_test_;
-  
+  CvReader* cv_reader_;
+
   UiMode mode_;
 
   static const LedColor palette_[4];

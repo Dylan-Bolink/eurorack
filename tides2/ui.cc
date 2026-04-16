@@ -49,14 +49,15 @@ const LedColor Ui::palette_[4] = {
   LED_COLOR_OFF
 };
 
-void Ui::Init(Settings* settings, FactoryTest* factory_test) {
+void Ui::Init(Settings* settings, FactoryTest* factory_test, CvReader* cv_reader) {
   leds_.Init();
   switches_.Init();
-  
+
   system_clock.Init();
-  
+
   settings_ = settings;
   factory_test_ = factory_test;
+  cv_reader_ = cv_reader;
   mode_ = UI_MODE_NORMAL;
   
   if (switches_.pressed_immediate(SWITCH_SHIFT)) {
@@ -137,7 +138,12 @@ void Ui::UpdateLEDs() {
         bool color_blind = s.color_blind == 1;
         
         leds_.set(LED_MODE, MakeColor(s.mode, color_blind));
-        leds_.set(LED_RANGE, MakeColor(s.range, color_blind));
+        if (cv_reader_->frequency_locked()) {
+          bool fast_blink = system_clock.milliseconds() & 128;
+          leds_.set(LED_RANGE, fast_blink ? MakeColor(cv_reader_->lock_mode(), color_blind) : LED_COLOR_OFF);
+        } else {
+          leds_.set(LED_RANGE, MakeColor(s.range, color_blind));
+        }
         leds_.set(LED_SHIFT, MakeColor((s.output_mode + 3) % 4, color_blind));
       }
       break;
@@ -173,6 +179,8 @@ void Ui::OnSwitchReleased(const Event& e) {
       mode_ = UI_MODE_CALIBRATION_C1;
       factory_test_->Calibrate(0, 1.0f, 3.0f);
       ignore_release_[SWITCH_RANGE] = ignore_release_[SWITCH_SHIFT] = true;
+    } else if (e.control_id == SWITCH_RANGE) {
+      cv_reader_->SetFrequencyLocked(!cv_reader_->frequency_locked());
     }
   } else if (mode_ == UI_MODE_CALIBRATION_C1) {
     factory_test_->Calibrate(1, 1.0f, 3.0f);
@@ -181,7 +189,16 @@ void Ui::OnSwitchReleased(const Event& e) {
     factory_test_->Calibrate(2, 1.0f, 3.0f);
     mode_ = UI_MODE_NORMAL;
   } else {
+    // When locked, range button cycles transpose mode instead of frequency range.
+    // No SaveState() here — transpose mode is synced on the next regular save.
+    if (cv_reader_->frequency_locked() && e.control_id == SWITCH_RANGE) {
+      cv_reader_->SetLockMode((cv_reader_->lock_mode() + 1) % 3);
+      return;
+    }
     State* s = settings_->mutable_state();
+    s->frequency_locked = cv_reader_->frequency_locked() ? 1 : 0;
+    s->set_locked_frequency(cv_reader_->lock_reference_pot());
+    s->set_lock_mode(cv_reader_->lock_mode());
     switch (e.control_id) {
       case SWITCH_MODE:
         s->mode = (s->mode + 1) % 4;

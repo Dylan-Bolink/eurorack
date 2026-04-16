@@ -66,6 +66,8 @@ class Differentiator {
   DISALLOW_COPY_AND_ASSIGN(Differentiator);
 };
 
+extern const float lut_warps_bipolar_fold[];
+
 class WavetableEngine {
  public:
   WavetableEngine() { }

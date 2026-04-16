@@ -45,35 +45,103 @@ void CvReader::Init(Settings* settings) {
   for (int i = 0; i < 6; ++i) {
     cv_reader_channel_[i].Init();
   }
+  alt_note_channel_.Init();
   
   note_lp_ = 0.0f;
   alt_note_lp_ = 0.0f;
+
+  const State& s = settings_->state();
+  frequency_locked_       = s.frequency_locked != 0;
+  lock_mode_              = s.get_lock_mode() % 3;
+  float stored_pot        = s.get_locked_frequency();
+  locked_note_semitones_  = CenterDetent(stored_pot) * 96.0f - 48.0f;
+  lock_reference_pot_     = stored_pot;
+  previous_pot_value_     = stored_pot;
 }
 
 float kShapeBreakpoints[] = {
   0.0f, 0.26f, 0.34f, 0.42f, 0.5f, 0.58f, 0.66f, 0.74f, 1.0f, 1.0f
 };
 
+void CvReader::SetFrequencyLocked(bool locked) {
+  if (locked && !frequency_locked_) {
+    locked_note_semitones_ = CenterDetent(previous_pot_value_) * 96.0f - 48.0f;
+    lock_reference_pot_    = previous_pot_value_;
+    octave_quantizer_.Init();
+  }
+  frequency_locked_ = locked;
+}
+
+void CvReader::SetLockMode(uint8_t mode) {
+  lock_mode_ = mode % 3;
+  octave_quantizer_.Init();  // reset hysteresis for fresh start in new mode
+}
+
 void CvReader::Read(IOBuffer::Block* block) {
   // Note.
-  float note = cv_reader_channel_[0].Process<true, false>(
-      CenterDetent(pots_adc_.float_value(POTS_ADC_CHANNEL_POT_FREQUENCY)),
-      96.0f,
-      -48.0f,
-      0.003f,
-  
-      cv_adc_.float_value(CV_ADC_CHANNEL_V_OCT),
-      settings_->adc_calibration_data(0).scale,
-      settings_->adc_calibration_data(0).offset,
-      0.2f,
-  
-      1.0f,
-  
-      -96.0f,
-      +96.0f);
+  float raw_pot = pots_adc_.float_value(POTS_ADC_CHANNEL_POT_FREQUENCY);
+  previous_pot_value_ = raw_pot;
 
-  ONE_POLE(note_lp_, note, 0.2f);
-  block->parameters.frequency = note_lp_; 
+  float note;
+  if (frequency_locked_ && !block->input_patched[1]) {
+    float delta = raw_pot - lock_reference_pot_;
+    if (fabsf(delta) < 0.05f) delta = 0.0f;  // deadband: snap to locked pitch within ±5%
+    float normalized = delta + 0.5f;
+    CONSTRAIN(normalized, 0.0f, 1.0f);
+    int semitone_offset;
+
+    if (lock_mode_ == 0) {
+      // Semitones: 25 steps, ±12 semitones (±1 octave)
+      int step = octave_quantizer_.Process(normalized, 25, 0.25f);
+      semitone_offset = step - 12;
+    } else if (lock_mode_ == 1) {
+      // Fifths + octaves: 9 snap points across ±2 octaves
+      static const int kFifths[9] = {-24, -19, -12, -7, 0, 7, 12, 19, 24};
+      int step = octave_quantizer_.Process(normalized, 9, 0.25f);
+      semitone_offset = kFifths[step];
+    } else {
+      // Octaves: 9 steps, ±4 octaves
+      int step = octave_quantizer_.Process(normalized, 9, 0.25f);
+      semitone_offset = (step - 4) * 12;
+    }
+
+    float target_semitones = locked_note_semitones_ + semitone_offset;
+    CONSTRAIN(target_semitones, -48.0f, 48.0f);
+    float target_pot = (target_semitones + 48.0f) / 96.0f;
+
+    // Run through the same channel as unlocked — CV path is completely unchanged.
+    // pot_lp_coefficient=1.0f makes the pot contribution instant (no slew).
+    note = cv_reader_channel_[0].Process<true, false>(
+        target_pot,
+        96.0f,
+        -48.0f,
+        1.0f,
+        cv_adc_.float_value(CV_ADC_CHANNEL_V_OCT),
+        settings_->adc_calibration_data(0).scale,
+        settings_->adc_calibration_data(0).offset,
+        0.2f,
+        1.0f,
+        -96.0f,
+        +96.0f);
+    // Bypass note_lp_ so octave jumps are instant; keep it in sync for unlocking.
+    note_lp_ = note;
+    block->parameters.frequency = note;
+  } else {
+    note = cv_reader_channel_[0].Process<true, false>(
+        CenterDetent(raw_pot),
+        96.0f,
+        -48.0f,
+        0.003f,
+        cv_adc_.float_value(CV_ADC_CHANNEL_V_OCT),
+        settings_->adc_calibration_data(0).scale,
+        settings_->adc_calibration_data(0).offset,
+        0.2f,
+        1.0f,
+        -96.0f,
+        +96.0f);
+    ONE_POLE(note_lp_, note, 0.2f);
+    block->parameters.frequency = note_lp_;
+  } 
 
   // FM
   block->parameters.fm = cv_reader_channel_[1].Process<false, true>(
@@ -129,7 +197,7 @@ void CvReader::Read(IOBuffer::Block* block) {
         1.0f);
   }
   
-  float alt_note = cv_reader_channel_[2].Process<true, true>(
+  float alt_note = alt_note_channel_.Process<true, true>(
       CenterDetent(pots_adc_.float_value(POTS_ADC_CHANNEL_POT_SHAPE)),
       96.0f,
       -48.0f,

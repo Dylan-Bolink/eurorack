@@ -38,6 +38,8 @@ namespace tides {
 using namespace std;
 using namespace stmlib;
 
+extern const int16_t wav_integrated_waves[];
+
 void WavetableEngine::Init() {
   
   x_pre_lp_ = 0.0f;

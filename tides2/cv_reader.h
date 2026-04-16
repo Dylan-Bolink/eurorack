@@ -30,6 +30,7 @@
 #define TIDES_CV_READER_H_
 
 #include "stmlib/stmlib.h"
+#include "stmlib/dsp/hysteresis_quantizer.h"
 
 #include "tides2/drivers/cv_adc.h"
 #include "tides2/drivers/pots_adc.h"
@@ -53,6 +54,12 @@ class CvReader {
   inline bool fm_cv_thresholded() const {
     return cv_adc_.float_value(CV_ADC_CHANNEL_FM) < -0.17f;
   }
+
+  void    SetFrequencyLocked(bool locked);
+  void    SetLockMode(uint8_t mode);
+  bool    frequency_locked()   const { return frequency_locked_; }
+  float   lock_reference_pot() const { return lock_reference_pot_; }
+  uint8_t lock_mode()          const { return lock_mode_; }
   
   inline float CenterDetent(float x) const {
     if (x < 0.49f) {
@@ -72,8 +79,15 @@ class CvReader {
   PotsAdc pots_adc_;
   float note_lp_;
   float alt_note_lp_;
-  
+  bool  frequency_locked_;
+  float locked_note_semitones_;     // locked pitch in semitones (post-CenterDetent, exact)
+  float lock_reference_pot_;        // raw pot position at lock time (for delta calc)
+  float previous_pot_value_;
+  uint8_t lock_mode_;               // 0=semitones, 1=fifths+oct, 2=octaves
+  stmlib::HysteresisQuantizer octave_quantizer_;
+
   CvReaderChannel cv_reader_channel_[kNumParameters];
+  CvReaderChannel alt_note_channel_;
   
   DISALLOW_COPY_AND_ASSIGN(CvReader);
 };
