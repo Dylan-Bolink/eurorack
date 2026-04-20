@@ -37,7 +37,7 @@
 #include "tides2/io_buffer.h"
 #include "tides2/poly_slope_generator.h"
 #include "tides2/ramp/ramp_extractor.h"
-#include "tides2/modulators/poly_lfo.h"
+#include "tides2/modulators/shifted_tides.h"
 #include "tides2/modulators/attractors.h"
 #include "tides2/modulators/wavetable_engine.h"
 #include "tides2/resources.h"
@@ -62,7 +62,7 @@ HysteresisQuantizer2 ratio_index_quantizer;
 IOBuffer io_buffer;
 PolySlopeGenerator poly_slope_generator;
 RampExtractor ramp_extractor;
-PolyLfo poly_lfo;
+ShiftedTides shifted_tides;
 Attractors attractors;
 WavetableEngine wavetable_engine;
 Settings settings;
@@ -278,17 +278,23 @@ void Process(IOBuffer::Block* block, size_t size) {
           break;
         case OUTPUT_MODE_SLOPE_PHASE:
           {
-            poly_lfo.set_shape(block->parameters.shape);
-            poly_lfo.set_shape_spread(block->parameters.slope);
-            poly_lfo.set_spread(block->parameters.smoothness);
-            poly_lfo.set_coupling(block->parameters.shift);
-
-            poly_lfo.Render(frequency, out, block->input_patched[0] ? block->input[0] : no_gate, size);
+            // New shifted tides rendering.
+            // each parameter is replaced with shift.
+            shifted_tides.Render(
+                range,
+                frequency,
+                block->parameters.shape,
+                block->parameters.slope,
+                block->parameters.smoothness,
+                block->parameters.shift,
+                block->input_patched[0] ? block->input[0] : no_gate,
+                out,
+                size);
 
             for (size_t i = 0; i < size; ++i) {
               for (size_t j = 0; j < kNumCvOutputs; ++j) {
                 block->output[j][2 * i] = block->output[j][2 * i + 1] =
-                    settings.dac_code(j, out[i].channel[j] / 32.0f);
+                    settings.dac_code(j, out[i].channel[j]);
               }
             }
           }
@@ -339,7 +345,7 @@ void Init() {
   poly_slope_generator.Init();
   ratio_index_quantizer.Init(20, 0.05f, false);
   ramp_extractor.Init(kSampleRate, 40.0f / kSampleRate);
-  poly_lfo.Init();
+  shifted_tides.Init();
   attractors.Init();
   wavetable_engine.Init();
   
