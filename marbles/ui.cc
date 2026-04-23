@@ -353,7 +353,9 @@ void Ui::UpdateLEDs() {
         } else {
           leds_.set(LED_T_RANGE, MakeColor(state.t_range, cb));
           if (mode_ == UI_MODE_NORMAL) {
-            if (state.x_control_mode == 5) {  // CONTROL_MODE_CHORD
+            if (state.x_control_mode == 4) {  // CONTROL_MODE_ENVELOPE
+              leds_.set(LED_X_RANGE, LED_COLOR_OFF);
+            } else if (state.x_control_mode == 5) {  // CONTROL_MODE_CHORD
               if (state.x_scale >= 6) {
                 leds_.set(LED_X_RANGE, LED_COLOR_OFF);  // chromatic
               } else {
@@ -687,9 +689,6 @@ void Ui::OnSwitchReleased(const Event& e) {
       // In Grids mode, only cycle on short tap
       if (state->t_model != T_GENERATOR_MODEL_GRIDS || e.data < 275) {
         state->x_control_mode = (state->x_control_mode + 1) % 6;
-
-        // skip dummy mode
-        if (state->x_control_mode == 4) state->x_control_mode = 5;
         
         if (state->x_control_mode != 4 && state->x_control_mode != 5 && state->x_scale > 5) {
           state->x_scale = 5;  // clamp chromatic back to last preset
@@ -729,6 +728,8 @@ void Ui::OnSwitchReleased(const Event& e) {
     case SWITCH_X_RANGE:
       if (mode_ >= UI_MODE_CALIBRATION_1 && mode_ <= UI_MODE_CALIBRATION_4) {
         NextCalibrationStep();
+      } else if (state->x_control_mode == 4) {  // CONTROL_MODE_ENVELOPE
+        // Range and scale disabled in envelope mode
       } else if (state->x_control_mode == 5) {  // CONTROL_MODE_CHORD
         if (e.data < kLongPressDuration) {
           state->x_scale = (state->x_scale + 1) % 7;  // 0-5 scales, 6 chromatic

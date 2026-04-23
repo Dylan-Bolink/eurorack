@@ -61,7 +61,7 @@ enum ControlMode {
   CONTROL_MODE_BUMP,          // 1 - solid yellow
   CONTROL_MODE_TILT,          // 2 - solid red
   CONTROL_MODE_ROUND_ROBIN,   // 3 - blinking green
-  CONTROL_MODE_DUMMY,         // 4 - blinking yellow (reserved)
+  CONTROL_MODE_ENVELOPE,      // 4 - blinking yellow
   CONTROL_MODE_CHORD          // 5 - blinking red
 };
 
@@ -151,6 +151,10 @@ class XYGenerator {
   int rr_counter_;
   float rr_prev_phase_;
   float rr_held_[kNumXChannels];
+
+  float env_phase_[kNumXChannels];
+  float env_rate_[kNumXChannels];
+  float env_prev_ramp_[kNumXChannels];
 
   Scale stored_scales_[kNumStoredScales];
 

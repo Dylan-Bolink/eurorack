@@ -31,6 +31,10 @@
 #include <algorithm>
 
 #include "stmlib/dsp/dsp.h"
+#include "stmlib/dsp/units.h"
+
+#include "marbles/random/distributions.h"
+#include "marbles/resources.h"
 
 namespace marbles {
 
@@ -85,6 +89,9 @@ void XYGenerator::Init(RandomStream* random_stream, float sr) {
   rr_counter_ = 0;
   rr_prev_phase_ = 0.0f;
   fill(&rr_held_[0], &rr_held_[kNumXChannels], 0.0f);
+  fill(&env_phase_[0], &env_phase_[kNumXChannels], 1.0f);
+  fill(&env_rate_[0], &env_rate_[kNumXChannels], 0.0f);
+  fill(&env_prev_ramp_[0], &env_prev_ramp_[kNumXChannels], 0.0f);
   for (int i = 0; i < kNumStoredScales; ++i) {
     stored_scales_[i].Init();
   }
@@ -164,10 +171,19 @@ void XYGenerator::Process(
     channel_ramp[0] = channel_ramp[1] = channel_ramp[2] = rr_clock;
   }
 
+  if (x_settings.control_mode == CONTROL_MODE_ENVELOPE
+      && clock_source != CLOCK_SOURCE_INTERNAL_T1_T2_T3) {
+    float* env_clock = (clock_source == CLOCK_SOURCE_EXTERNAL)
+                        ? ramps.slave[0] : channel_ramp[0];
+    channel_ramp[0] = channel_ramp[1] = channel_ramp[2] = env_clock;
+  }
+
   if (*reset) {
     ramp_divider_.Reset();
     rr_counter_ = 0;
     rr_prev_phase_ = 0.0f;
+    fill(&env_phase_[0], &env_phase_[kNumXChannels], 1.0f);
+    fill(&env_prev_ramp_[0], &env_prev_ramp_[kNumXChannels], 0.0f);
   }
   
   ramp_divider_.Process(y_settings.ratio, channel_ramp[1], ramps.external, size);
@@ -228,7 +244,8 @@ void XYGenerator::Process(
     // When all channels follow the same clock, the deja-vu random looping will
     // follow the same pattern and the constant-mode input will be shifted!
     if (clock_source != CLOCK_SOURCE_INTERNAL_T1_T2_T3
-        && i > 0 && i < kNumXChannels) {
+        && i > 0 && i < kNumXChannels
+        && x_settings.control_mode != CONTROL_MODE_ENVELOPE) {
       sequence = &random_sequence_[0];
       if (settings.use_shift_register) {
         use_shifted_sequences = true;
@@ -252,8 +269,10 @@ void XYGenerator::Process(
     }
     use_shifted_sequences_[i] = use_shifted_sequences;
     
-    if (x_settings.control_mode == CONTROL_MODE_CHORD && i < kNumXChannels) {
-      // Chord mode: skip randomness
+    if (x_settings.control_mode == CONTROL_MODE_ENVELOPE && i < kNumXChannels) {
+      // Envelope mode: skip 
+    } else if (x_settings.control_mode == CONTROL_MODE_CHORD && i < kNumXChannels) {
+      // Chord mode: skip
     } else if (x_settings.control_mode == CONTROL_MODE_ROUND_ROBIN
         && i < kNumXChannels
         && i != static_cast<size_t>(rr_counter_)) {
@@ -262,6 +281,101 @@ void XYGenerator::Process(
       }
     } else {
       channel.Process(sequence, channel_ramp[i], &output[i], size, kNumChannels);
+    }
+  }
+
+  if (x_settings.control_mode == CONTROL_MODE_ENVELOPE) {
+    const float bias = x_settings.bias;
+    const float spread = x_settings.spread;
+    const float steps = x_settings.steps;
+
+    bool external_clock = (clock_source != CLOCK_SOURCE_INTERNAL_T1_T2_T3);
+    const float output_scale = 5.0f;
+
+    for (size_t s = 0; s < size; s++) {
+      if (external_clock) {
+        float prev = (s == 0) ? rr_prev_phase_ : channel_ramp[0][s - 1];
+        if (channel_ramp[0][s] < prev) {
+          rr_counter_ = (rr_counter_ + 1) % static_cast<int>(kNumXChannels);
+        }
+      }
+
+      for (size_t ch = 0; ch < kNumXChannels; ch++) {
+        float* ramp = channel_ramp[ch];
+
+        // Trigger detection
+        bool triggered = false;
+        if (external_clock) {
+          float prev = (s == 0) ? rr_prev_phase_ : ramp[s - 1];
+          triggered = (ramp[s] < prev)
+              && (ch == static_cast<size_t>(rr_counter_));
+        } else {
+          float prev = (s == 0) ? env_prev_ramp_[ch] : ramp[s - 1];
+          triggered = (ramp[s] < prev);
+        }
+
+        if (triggered) {
+          float u = random_sequence_[ch].NextValue(false, 0.0f);
+
+          // Same distribution as normal X mode
+          float degenerate_amount = 1.25f - spread * 25.0f;
+          float bernoulli_amount = spread * 25.0f - 23.75f;
+          CONSTRAIN(degenerate_amount, 0.0f, 1.0f);
+          CONSTRAIN(bernoulli_amount, 0.0f, 1.0f);
+
+          float time_value = BetaDistributionSample(u, spread, bias);
+          float bernoulli_value = u >= (1.0f - bias) ? 0.999999f : 0.0f;
+          time_value += degenerate_amount * (bias - time_value);
+          time_value += bernoulli_amount * (bernoulli_value - time_value);
+
+          // Skip fastest 20% of time range
+          time_value = 0.2f + time_value * 0.8f;
+
+          env_rate_[ch] = (1.0f / 32.0f)
+              * SemitonesToRatioSafe(-156.0f * time_value);
+          env_phase_[ch] = 0.0f;
+        }
+
+        // Compute envelope shape using phase-warped raised cosine
+        float value = 0.0f;
+        float phase = env_phase_[ch];
+
+        if (phase < 1.0f) {
+          float attack_fraction = steps;
+          CONSTRAIN(attack_fraction, 0.001f, 0.999f);
+
+          if (phase < attack_fraction) {
+            // Attack phase
+            float t = phase / attack_fraction;
+            float swell = steps * steps;
+            float t_cubed = t * t * t;
+            float t_warped = t + swell * (t_cubed - t);
+            value = Interpolate(lut_raised_cosine, t_warped, 256.0f);
+          } else {
+            // Decay phase
+            float t = (phase - attack_fraction) / (1.0f - attack_fraction);
+            float snap = (1.0f - steps) * (1.0f - steps);
+            float inv = 1.0f - t;
+            float t_fast = 1.0f - inv * inv * inv;
+            float t_warped = t + snap * (t_fast - t);
+            value = 1.0f - Interpolate(lut_raised_cosine, t_warped, 256.0f);
+          }
+        } else {
+          value = (steps > 0.99f) ? 1.0f : 0.0f;
+        }
+
+        CONSTRAIN(value, 0.0f, 1.0f);
+        output[ch + s * kNumChannels] = value * output_scale;
+        env_phase_[ch] += env_rate_[ch];
+      }
+    }
+
+    // Update previous ramp trackers
+    if (external_clock) {
+      rr_prev_phase_ = channel_ramp[0][size - 1];
+    }
+    for (size_t ch = 0; ch < kNumXChannels; ch++) {
+      env_prev_ramp_[ch] = channel_ramp[ch][size - 1];
     }
   }
 
