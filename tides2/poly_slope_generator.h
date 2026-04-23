@@ -103,6 +103,7 @@ class PolySlopeGenerator {
     shift_ = 0.0f;
     shape_ = 0.0f;
     fold_ = 0.0f;
+    pulsar_duty_ = 1.0f;
     
     ramp_generator_.Init();
     for (size_t i = 0; i < num_channels; ++i) {
@@ -172,6 +173,14 @@ class PolySlopeGenerator {
       // Skew the response of the pulse width parameter, so that a more
       // interesting range of attack times can be set.
       pw = 0.5f + 0.6f * (pw - 0.5f) / (fabsf(pw - 0.5f) + 0.1f);
+    }
+
+    if (ramp_mode == RAMP_MODE_LOOPING && range == RANGE_AUDIO && pw < 0.5f) {
+      // CCW half of SLOPE Pulsar compression
+      pulsar_duty_ = 0.05f + 0.95f * (pw * 2.0f);
+      pw = 0.5f;
+    } else {
+      pulsar_duty_ = 1.0f;
     }
 
     if (ramp && ramp_mode == RAMP_MODE_AR) {
@@ -255,6 +264,7 @@ class PolySlopeGenerator {
       const float step = shift * (1.0f / (num_channels - 1));
       const float partial_step = shift * (1.0f / num_channels);
       const float fold = fold_modulation.Next();
+      const float duty = pulsar_duty_;
 
       float per_channel_pw[num_channels];
       const float pw_increment = (shift > 0.0f ? (1.0f - pw) : pw) * step;
@@ -289,15 +299,26 @@ class PolySlopeGenerator {
       if (output_mode == OUTPUT_MODE_GATES) {
         const float phase = ramp_generator_.phase(0);
         const float frequency = ramp_generator_.frequency(0);
-        const float raw = ramp_shaper_[0].Slope<
-              ramp_mode, range>(phase, 0.0f, frequency, pw);
-        const float slope = ramp_waveshaper_[0].Shape<
-              ramp_mode>(raw, shape_table, shape_fractional);
-
-        out[i].channel[0] = Fold<ramp_mode>(slope, fold) * shift;
-        out[i].channel[1] = Fold<RAMP_MODE_MOD>(slope, fold) * shift;/*Scale<ramp_mode>(
-          is_phasor ? ramp_waveshaper_[1].Shape<ramp_mode>(raw, &lut_wavetable[8200], 0.0f) : raw
-        );*/
+        if (ramp_mode == RAMP_MODE_LOOPING && range == RANGE_AUDIO
+            && duty < 1.0f) {
+          if (phase < duty) {
+            float warped = phase / duty;
+            float shaped = ramp_waveshaper_[0].Shape<ramp_mode>(
+                warped, shape_table, shape_fractional);
+            out[i].channel[0] = Fold<ramp_mode>(shaped, fold) * shift;
+            out[i].channel[1] = Fold<RAMP_MODE_MOD>(shaped, fold) * shift;
+          } else {
+            out[i].channel[0] = 0.0f;
+            out[i].channel[1] = 0.0f;
+          }
+        } else {
+          const float raw = ramp_shaper_[0].Slope<
+                ramp_mode, range>(phase, 0.0f, frequency, pw);
+          const float slope = ramp_waveshaper_[0].Shape<
+                ramp_mode>(raw, shape_table, shape_fractional);
+          out[i].channel[0] = Fold<ramp_mode>(slope, fold) * shift;
+          out[i].channel[1] = Fold<RAMP_MODE_MOD>(slope, fold) * shift;
+        }
         out[i].channel[2] = ramp_shaper_[2].EOA<ramp_mode, range>(
             phase, frequency, pw) * 8.0f;
         out[i].channel[3] = ramp_shaper_[3].EOR<ramp_mode, range>(
@@ -305,12 +326,26 @@ class PolySlopeGenerator {
       } else if (output_mode == OUTPUT_MODE_AMPLITUDE) {
         const float phase = ramp_generator_.phase(0);
         const float frequency = ramp_generator_.frequency(0);
-        const float raw = ramp_shaper_[0].Slope<
-              ramp_mode, range>(phase, 0.0f, frequency, pw);
-        const float shaped = ramp_waveshaper_[0].Shape<
-              ramp_mode>(raw, shape_table, shape_fractional);
-        const float slope = Fold<ramp_mode>(shaped, fold) * \
-              (shift < 0.0f ? -1.0f : + 1.0f);
+        float slope;
+        if (ramp_mode == RAMP_MODE_LOOPING && range == RANGE_AUDIO
+            && duty < 1.0f) {
+          if (phase < duty) {
+            float warped = phase / duty;
+            float shaped = ramp_waveshaper_[0].Shape<ramp_mode>(
+                warped, shape_table, shape_fractional);
+            slope = Fold<ramp_mode>(shaped, fold) * \
+                (shift < 0.0f ? -1.0f : + 1.0f);
+          } else {
+            slope = 0.0f;
+          }
+        } else {
+          const float raw = ramp_shaper_[0].Slope<
+                ramp_mode, range>(phase, 0.0f, frequency, pw);
+          const float shaped = ramp_waveshaper_[0].Shape<
+                ramp_mode>(raw, shape_table, shape_fractional);
+          slope = Fold<ramp_mode>(shaped, fold) * \
+                (shift < 0.0f ? -1.0f : + 1.0f);
+        }
         const float channel_index = fabsf(shift * 5.1f);
         for (size_t j = 0; j < num_channels; ++j) {
           const float channel = static_cast<float>(j + 1);
@@ -323,30 +358,60 @@ class PolySlopeGenerator {
         float phase_shift = 0.0f;
         for (size_t j = 0; j < num_channels; ++j) {
           size_t source = ramp_mode == RAMP_MODE_AR ? j : 0;
-          out[i].channel[j] = Fold<ramp_mode>(
-              ramp_waveshaper_[j].Shape<ramp_mode>(
-                  ramp_shaper_[j].Slope<ramp_mode, range>(
-                      ramp_generator_.phase(source),
-                      phase_shift, 
-                      ramp_generator_.frequency(source),
-                      ramp_mode == RAMP_MODE_AD ? per_channel_pw[j] : pw),
-                  shape_table,
-                  shape_fractional),
-              fold);
+          if (ramp_mode == RAMP_MODE_LOOPING && range == RANGE_AUDIO
+              && duty < 1.0f) {
+            float p = ramp_generator_.phase(source) + phase_shift;
+            if (p >= 1.0f) p -= 1.0f;
+            else if (p < 0.0f) p += 1.0f;
+            if (p < duty) {
+              float warped = p / duty;
+              out[i].channel[j] = Fold<ramp_mode>(
+                  ramp_waveshaper_[j].Shape<ramp_mode>(
+                      warped, shape_table, shape_fractional),
+                  fold);
+            } else {
+              out[i].channel[j] = 0.0f;
+            }
+          } else {
+            out[i].channel[j] = Fold<ramp_mode>(
+                ramp_waveshaper_[j].Shape<ramp_mode>(
+                    ramp_shaper_[j].Slope<ramp_mode, range>(
+                        ramp_generator_.phase(source),
+                        phase_shift,
+                        ramp_generator_.frequency(source),
+                        ramp_mode == RAMP_MODE_AD ? per_channel_pw[j] : pw),
+                    shape_table,
+                    shape_fractional),
+                fold);
+          }
           phase_shift -= range == RANGE_AUDIO ? step : partial_step;
         }
       } else if (output_mode == OUTPUT_MODE_FREQUENCY) {
         for (size_t j = 0; j < num_channels; ++j) {
-          out[i].channel[j] = Fold<ramp_mode>(
-              ramp_waveshaper_[j].Shape<ramp_mode>(
-                  ramp_shaper_[j].Slope<ramp_mode, range>(
-                      ramp_generator_.phase(j),
-                      0.0f, 
-                      ramp_generator_.frequency(j),
-                      pw),
-                  shape_table,
-                  shape_fractional),
-              fold);
+          if (ramp_mode == RAMP_MODE_LOOPING && range == RANGE_AUDIO
+              && duty < 1.0f) {
+            float p = ramp_generator_.phase(j);
+            if (p < duty) {
+              float warped = p / duty;
+              out[i].channel[j] = Fold<ramp_mode>(
+                  ramp_waveshaper_[j].Shape<ramp_mode>(
+                      warped, shape_table, shape_fractional),
+                  fold);
+            } else {
+              out[i].channel[j] = 0.0f;
+            }
+          } else {
+            out[i].channel[j] = Fold<ramp_mode>(
+                ramp_waveshaper_[j].Shape<ramp_mode>(
+                    ramp_shaper_[j].Slope<ramp_mode, range>(
+                        ramp_generator_.phase(j),
+                        0.0f,
+                        ramp_generator_.frequency(j),
+                        pw),
+                    shape_table,
+                    shape_fractional),
+                fold);
+          }
         }
       }
     }
@@ -417,6 +482,7 @@ class PolySlopeGenerator {
   float shift_;
   float shape_;
   float fold_;
+  float pulsar_duty_;
   float lp_1_[num_channels];
   float lp_2_[num_channels];
   

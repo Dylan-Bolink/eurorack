@@ -75,7 +75,7 @@ class ShiftedTides {
           smoothnesses[j],  // smoothness
           0.5f,             // no phase spread within each generator
           gate_flags,
-          nullptr,
+          0,
           temp_,
           size);
       for (size_t i = 0; i < size; ++i) {
