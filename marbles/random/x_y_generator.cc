@@ -315,6 +315,19 @@ void XYGenerator::Process(
         }
 
         if (triggered) {
+          float phase = env_phase_[ch];
+          float af = steps;
+          CONSTRAIN(af, 0.001f, 0.999f);
+
+          // NARROW = hard reset, POSITIVE = serge, FULL = legato
+          if (x_settings.voltage_range == VOLTAGE_RANGE_POSITIVE) {
+            if (phase < af) triggered = false;
+          } else if (x_settings.voltage_range == VOLTAGE_RANGE_FULL) {
+            if (phase < 1.0f) triggered = false;
+          }
+        }
+
+        if (triggered) {
           float u = random_sequence_[ch].NextValue(false, 0.0f);
 
           // Same distribution as normal X mode
