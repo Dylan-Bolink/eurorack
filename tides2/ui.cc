@@ -144,7 +144,12 @@ void Ui::UpdateLEDs() {
         } else {
           leds_.set(LED_RANGE, MakeColor(s.range, color_blind));
         }
-        leds_.set(LED_SHIFT, MakeColor((s.output_mode + 3) % 4, color_blind));
+        if (s.mix_mode && s.output_mode == 3) {
+          bool mix_blink = system_clock.milliseconds() & 128;
+          leds_.set(LED_SHIFT, mix_blink ? MakeColor((s.output_mode + 3) % 4, color_blind) : LED_COLOR_OFF);
+        } else {
+          leds_.set(LED_SHIFT, MakeColor((s.output_mode + 3) % 4, color_blind));
+        }
       }
       break;
       
@@ -181,6 +186,14 @@ void Ui::OnSwitchReleased(const Event& e) {
       ignore_release_[SWITCH_RANGE] = ignore_release_[SWITCH_SHIFT] = true;
     } else if (e.control_id == SWITCH_RANGE) {
       cv_reader_->SetFrequencyLocked(!cv_reader_->frequency_locked());
+    } else if (e.control_id == SWITCH_SHIFT) {
+      State* s = settings_->mutable_state();
+      bool in_chord = s->mode == 3 && s->output_mode == 3;
+      bool in_freq = s->mode != 3 && s->output_mode == 3;
+      if (in_chord || in_freq) {
+        s->mix_mode = s->mix_mode ? 0 : 1;
+        settings_->SaveState();
+      }
     }
   } else if (mode_ == UI_MODE_CALIBRATION_C1) {
     factory_test_->Calibrate(1, 1.0f, 3.0f);

@@ -56,8 +56,8 @@ void WavetableEngine::Init() {
   phases_[1] = 0.0f;
   next_sample_tri_ = 0.0f;
   diff_out_.Init();
-  fill(&lp_1_[0], &lp_1_[4], 0.0f);
-  fill(&lp_2_[0], &lp_2_[4], 0.0f);
+  fill(&lp_1_[0], &lp_1_[2], 0.0f);
+  fill(&lp_2_[0], &lp_2_[2], 0.0f);
 }
 
 inline float Clamp(float x, float amount) {
@@ -194,7 +194,7 @@ void WavetableEngine::Render(
 
     out[index].channel[0] = fold(mix, fold_amount, true);
     out[index].channel[1] = fold(mix, fold_amount * 0.65f, false);
-    out[index].channel[2] = warps_fold(BandLimitedSlope(phases_[1], sub_f, 0.5f), fold_amount);
+    out[index].channel[2] = mix >= 0.0f ? 5.0f : -5.0f;
     out[index].channel[3] = BandLimitedPulse(phases_[1], sub_f, 0.5f);
   }
   filter(f0, parameters.smoothness, out, size);

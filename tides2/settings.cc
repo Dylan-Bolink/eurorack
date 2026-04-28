@@ -68,6 +68,7 @@ bool Settings::Init() {
   state_.mode = 1;
   state_.range = 2;
   state_.output_mode = 0;
+  state_.mix_mode = 0;
   
   bool success = chunk_storage_.Init(&persistent_data_, &state_);
   
@@ -89,6 +90,7 @@ bool Settings::Init() {
     CONSTRAIN(state_.mode, 0, 3);
     CONSTRAIN(state_.range, 0, 2);
     CONSTRAIN(state_.output_mode, 0, 3);
+    CONSTRAIN(state_.mix_mode, 0, 1);
   }
   
   return success;

@@ -46,7 +46,7 @@ void CvReader::Init(Settings* settings) {
     cv_reader_channel_[i].Init();
   }
   alt_note_channel_.Init();
-  
+
   note_lp_ = 0.0f;
   alt_note_lp_ = 0.0f;
 
@@ -83,6 +83,9 @@ void CvReader::Read(IOBuffer::Block* block) {
   previous_pot_value_ = raw_pot;
 
   float note;
+  if (frequency_locked_ && block->input_patched[1]) {
+    frequency_locked_ = false;
+  }
   if (frequency_locked_ && !block->input_patched[1]) {
     float delta = raw_pot - lock_reference_pot_;
     if (fabsf(delta) < 0.05f) delta = 0.0f;  // deadband: snap to locked pitch within ±5%

@@ -37,9 +37,10 @@
 #include "tides2/io_buffer.h"
 #include "tides2/poly_slope_generator.h"
 #include "tides2/ramp/ramp_extractor.h"
-#include "tides2/modulators/shifted_tides.h"
+#include "tides2/modulators/chord_table.h"
 #include "tides2/modulators/attractors.h"
 #include "tides2/modulators/wavetable_engine.h"
+#include "tides2/modulators/formant.h"
 #include "tides2/resources.h"
 #include "tides2/settings.h"
 #include "tides2/ui.h"
@@ -62,9 +63,9 @@ HysteresisQuantizer2 ratio_index_quantizer;
 IOBuffer io_buffer;
 PolySlopeGenerator poly_slope_generator;
 RampExtractor ramp_extractor;
-ShiftedTides shifted_tides;
 Attractors attractors;
 WavetableEngine wavetable_engine;
+FormantEngine formant;
 Settings settings;
 Ui ui;
 
@@ -214,6 +215,7 @@ void Process(IOBuffer::Block* block, size_t size) {
   
   if (output_mode != previous_output_mode) {
     poly_slope_generator.Reset();
+    poly_slope_generator.clear_ratio_override();
     previous_output_mode = output_mode;
   }
 
@@ -232,6 +234,14 @@ void Process(IOBuffer::Block* block, size_t size) {
       out,
       size);
 
+      // Mix mode: sum all voices into output 1 for frequency modes
+      if (settings.state().mix_mode && output_mode == OUTPUT_MODE_FREQUENCY) {
+        for (size_t i = 0; i < size; ++i) {
+          out[i].channel[0] = (out[i].channel[0] + out[i].channel[1]
+              + out[i].channel[2] + out[i].channel[3]) * 0.25f;
+        }
+      }
+
       if (half_speed) {
         for (size_t i = 0; i < size; ++i) {
           for (size_t j = 0; j < kNumCvOutputs; ++j) {
@@ -249,25 +259,18 @@ void Process(IOBuffer::Block* block, size_t size) {
   } else {
       switch (output_mode) {
         case OUTPUT_MODE_GATES:
-        case OUTPUT_MODE_AMPLITUDE:
           {
             float g1_frequency = kRoot[state.range] * stmlib::SemitonesToRatio(transposition);
             float g2_frequency = kRoot[state.range] * stmlib::SemitonesToRatio(alt_transposition);
             bool g1_reset = block->input_patched[0] && (block->input[0][0] & stmlib::GATE_FLAG_HIGH);
             bool g2_reset = block->input_patched[1] && (block->input[1][0] & stmlib::GATE_FLAG_HIGH);
             attractors.Reset(g1_reset, g2_reset);
-            if (output_mode == OUTPUT_MODE_GATES) {
-              attractors.set_lorenz(block->parameters.slope);
-              attractors.set_rossler(block->parameters.smoothness);
-            } else {
-              attractors.set_thomas(block->parameters.slope);
-              attractors.set_chua(block->parameters.smoothness);
-            }
-            
+            attractors.set_lorenz(block->parameters.slope);
+            attractors.set_rossler(block->parameters.smoothness);
             attractors.set_gain(block->parameters.shift);
             attractors.set_speed(state.range);
 
-            attractors.Process(g1_frequency, g2_frequency, static_cast<int>(output_mode));
+            attractors.Process(g1_frequency, g2_frequency, 0);
 
             for (size_t i = 0; i < size; ++i) {
               for (size_t j = 0; j < kNumCvOutputs; ++j) {
@@ -276,20 +279,57 @@ void Process(IOBuffer::Block* block, size_t size) {
             }
           }
           break;
+        case OUTPUT_MODE_AMPLITUDE:
+          {
+            formant.Render(block->parameters, frequency, out,
+                            block->input_patched[0] ? block->input[0] : no_gate,
+                            block->input_patched[0], size);
+            for (size_t i = 0; i < size; ++i) {
+              for (size_t j = 0; j < kNumCvOutputs; ++j) {
+                block->output[j][i] = settings.dac_code(j, out[i].channel[j]);
+              }
+            }
+          }
+          break;
         case OUTPUT_MODE_SLOPE_PHASE:
           {
-            // New shifted tides rendering.
-            // each parameter is replaced with shift.
-            shifted_tides.Render(
+            wavetable_engine.Render(block->parameters, frequency, out, block->input_patched[0] ? block->input[0] : no_gate, size);
+
+            for (size_t j = 0; j < kNumCvOutputs; ++j) {
+              for (size_t i = 0; i < size; ++i) {
+                block->output[j][2 * i] = block->output[j][2 * i + 1] =
+                    settings.dac_code(j, out[i].channel[j]);
+              }
+            }
+          }
+          break;
+        case OUTPUT_MODE_FREQUENCY:
+          {
+            // Chord mode: use single poly_slope_generator in FREQUENCY mode
+            // with chord ratio table override.
+            poly_slope_generator.set_ratio_override(
+                chord_ratio_table, kNumChords);
+            poly_slope_generator.Render(
+                RAMP_MODE_LOOPING,
+                OUTPUT_MODE_FREQUENCY,
                 range,
                 frequency,
-                block->parameters.shape,
                 block->parameters.slope,
+                block->parameters.shape,
                 block->parameters.smoothness,
                 block->parameters.shift,
                 block->input_patched[0] ? block->input[0] : no_gate,
+                !block->input_patched[0] && block->input_patched[1] ? ramp : NULL,
                 out,
                 size);
+            poly_slope_generator.clear_ratio_override();
+
+            if (settings.state().mix_mode) {
+              for (size_t i = 0; i < size; ++i) {
+                out[i].channel[0] = (out[i].channel[0] + out[i].channel[1]
+                    + out[i].channel[2] + out[i].channel[3]) * 0.25f;
+              }
+            }
 
             for (size_t i = 0; i < size; ++i) {
               for (size_t j = 0; j < kNumCvOutputs; ++j) {
@@ -299,18 +339,6 @@ void Process(IOBuffer::Block* block, size_t size) {
             }
           }
           break;
-        case OUTPUT_MODE_FREQUENCY:  
-          { 
-            wavetable_engine.Render(block->parameters, frequency, out, block->input_patched[0] ? block->input[0] : no_gate, size);
-            
-            for (size_t j = 0; j < kNumCvOutputs; ++j) {
-              for (size_t i = 0; i < size; ++i) {       
-                block->output[j][2 * i] = block->output[j][2 * i + 1] =
-                    settings.dac_code(j, out[i].channel[j]);
-              }
-            }
-          }
-          break;  
         default:
           break;
       }
@@ -345,10 +373,12 @@ void Init() {
   poly_slope_generator.Init();
   ratio_index_quantizer.Init(20, 0.05f, false);
   ramp_extractor.Init(kSampleRate, 40.0f / kSampleRate);
-  shifted_tides.Init();
+  
   attractors.Init();
+  formant.Init();
   wavetable_engine.Init();
   
+
   std::fill(&no_gate[0], &no_gate[kBlockSize], GATE_FLAG_LOW);
 
   sys.StartTimers();

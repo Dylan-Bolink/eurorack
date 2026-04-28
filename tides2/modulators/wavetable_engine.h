@@ -113,7 +113,7 @@ class WavetableEngine {
       for (size_t s = 0; s < size; s++) {
         for (size_t i = 0; i < 4; ++i) {
           float f = frequency * 0.5f;
-          f += (1.0f - f) * ratio;// f = frequency * 0.5f * (1- ratio) + ratio
+          f += (1.0f - f) * ratio;
           ONE_POLE(lp_1_[i], out[s].channel[i], f);
           ONE_POLE(lp_2_[i], lp_1_[i], f);
           out[s].channel[i] = lp_2_[i];

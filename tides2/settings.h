@@ -68,6 +68,7 @@ struct State {
   uint8_t locked_frequency_hi;
   uint8_t locked_frequency_lo;
   uint8_t frequency_lock_mode;
+  uint8_t mix_mode;
 
   enum { tag = 0x54415453 };  // STAT
 
