@@ -39,7 +39,7 @@ Long-press **Range** again to unlock.
 | **Yellow** | Fifths and octaves | +- 2 octaves |
 | **Red** | Octaves | +- 4 octaves |
 
-> Patching a cable into clock exits frequency lock since you enter clock locking from the original firmware.
+> Patching a cable into **Clock** exits frequency lock since you enter [**clocked speed**](https://arc.net/l/quote/tgzhboie) from the original firmware.
 
 <br>
 
@@ -63,13 +63,13 @@ Replaces the wavefolder with a more crude digital wavefolder.
 
 ### <img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_1.png" style="width:27px; height: 27px; transform: translateY(5px); margin-right: 5px;"> Alt: Amplitude
 
-Instead of smooth crossfading, shift selects one output at a time. Four discrete positions, no blending.
+Instead of smooth crossfading, **shift** selects one output at a time. Four discrete positions, no blending.
 
 <a id="alt-slope--phase"></a>
 
 ### <img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_2.png" style="width:27px; height: 27px; transform: translateY(5px); margin-right: 5px;"> Alt: Slope / Phase
 
-Shift spreads different waveshapes(shape parameter) across the four outputs instead of phase offsets. 
+**Shift** spreads different waveshapes(shape parameter) across the four outputs instead of phase offsets. 
 
 <a id="alt-frequency"></a>
 
@@ -143,14 +143,14 @@ A driver oscillator excites a Serge style envelope generator (formant envelope).
 
 > The logic combined pulse is a 3 state pulse wave where smoothness attenuates it at the first half. The second half of smoothness introduces a sub square oscillator.
 
-> With the shift attenuverter fully open, the shift CV input tracks approximately v/oct.
+> With the **shift** attenuverter fully open, the **shift** CV input tracks approximately v/oct.
 
 #### Trig input
 Patching the **trig** input decouples the formant envelope from the driver oscillator. The driver pulse is normalized in the software to the **trig** input if not patched.
 
 #### Alt: Decouple formant frequency
 
-The formant frequency no longer tracks the driver pitch. Instead, shift sets an absolute formant frequency.
+The formant frequency no longer tracks the driver pitch. Instead, **Shift** sets an absolute formant frequency.
 
 
 <a id="wavetable"></a>
@@ -163,8 +163,10 @@ A 3D wave terrain synthesizer. Three knobs navigate a grid of wavetables.
 |--------|----------|
 | **1** | Wavetable bipolar |
 | **2** | Wavetable unipolar |
-| **3** | 1Bit wavetable output |
+| **3** | 1-bit wavetable output |
 | **4** | Sub-octave pulse |
+
+> The 1-bit output is a nod to the [**_sheep_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_original/firmware/) firmware.
 
 | Knob | Function |
 |------|----------|
@@ -175,7 +177,7 @@ A 3D wave terrain synthesizer. Three knobs navigate a grid of wavetables.
 
 #### Alt: No Interpolation
 
-All interpolation between wavetable positions is removed. X, Y, and Z snap to the nearest grid point. Stepped, lo-fi, digital character.
+All interpolation between wavetable positions is removed. X, Y, and Z snap to the nearest grid point.
 
 <a id="chord"></a>
 
