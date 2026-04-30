@@ -144,9 +144,21 @@ void Ui::UpdateLEDs() {
         } else {
           leds_.set(LED_RANGE, MakeColor(s.range, color_blind));
         }
-        if (s.mix_mode && s.output_mode == 3) {
-          bool mix_blink = system_clock.milliseconds() & 128;
-          leds_.set(LED_SHIFT, mix_blink ? MakeColor((s.output_mode + 3) % 4, color_blind) : LED_COLOR_OFF);
+        if (s.alt_mode) {
+          LedColor output_color = MakeColor((s.output_mode + 3) % 4, color_blind);
+          if (output_color == LED_COLOR_OFF) {
+            // No led cycle through colors
+            uint32_t phase = system_clock.milliseconds() % 256;
+            if (phase < 64) {
+              const LedColor cycle[] = { LED_COLOR_GREEN, LED_COLOR_YELLOW, LED_COLOR_RED };
+              leds_.set(LED_SHIFT, cycle[(phase * 3) >> 6]);
+            } else {
+              leds_.set(LED_SHIFT, LED_COLOR_OFF);
+            }
+          } else {
+            bool alt_blink = system_clock.milliseconds() & 128;
+            leds_.set(LED_SHIFT, alt_blink ? output_color : LED_COLOR_OFF);
+          }
         } else {
           leds_.set(LED_SHIFT, MakeColor((s.output_mode + 3) % 4, color_blind));
         }
@@ -188,12 +200,7 @@ void Ui::OnSwitchReleased(const Event& e) {
       cv_reader_->SetFrequencyLocked(!cv_reader_->frequency_locked());
     } else if (e.control_id == SWITCH_SHIFT) {
       State* s = settings_->mutable_state();
-      bool in_chord = s->mode == 3 && s->output_mode == 3;
-      bool in_freq = s->mode != 3 && s->output_mode == 3;
-      if (in_chord || in_freq) {
-        s->mix_mode = s->mix_mode ? 0 : 1;
-        settings_->SaveState();
-      }
+      s->alt_mode = s->alt_mode ? 0 : 1;
     }
   } else if (mode_ == UI_MODE_CALIBRATION_C1) {
     factory_test_->Calibrate(1, 1.0f, 3.0f);

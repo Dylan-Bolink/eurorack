@@ -43,12 +43,13 @@ class FormantEngine {
       PolySlopeGenerator::OutputSample* out,
       const stmlib::GateFlags* gate_flags,
       bool trig_patched,
+      bool alt_mode,
       size_t size) {
 
-    // Map shift to formant ratio: 2^((shift - 0.5) * 6)
+    // Map shift to formant ratio: +-48 semitones (8 octaves)
     float shift = parameters.shift;
     CONSTRAIN(shift, 0.0f, 1.0f);
-    float target_ratio = stmlib::SemitonesToRatio((shift - 0.5f) * 72.0f);
+    float target_ratio = stmlib::SemitonesToRatio((shift - 0.5f) * 96.0f);
 
     float pw = parameters.slope;
     CONSTRAIN(pw, 0.05f, 0.95f);
@@ -71,7 +72,8 @@ class FormantEngine {
       const float pw = pw_mod.Next();
       const float shape = shape_mod.Next();
 
-      const float formant_freq = f0 * ratio;
+      const float base_rate = 130.81f / 48000.0f;  // middle c
+      const float formant_freq = alt_mode ? ratio * base_rate : f0 * ratio;
 
       // Driver oscillator
       bool gate_reset = gate_flags[i] & stmlib::GATE_FLAG_RISING;

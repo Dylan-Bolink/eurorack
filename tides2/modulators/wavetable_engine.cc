@@ -87,6 +87,7 @@ void WavetableEngine::Render(
     float f0,
     PolySlopeGenerator::OutputSample* out,
     const GateFlags* gate_flags,
+    bool alt_mode,
     size_t size) {
   
   ONE_POLE(x_pre_lp_, parameters.slope * 6.9999f, 0.2f);
@@ -106,7 +107,13 @@ void WavetableEngine::Render(
   x_fractional += quantization * (Clamp(x_fractional, 16.0f) - x_fractional);
   y_fractional += quantization * (Clamp(y_fractional, 16.0f) - y_fractional);
   z_fractional += quantization * (Clamp(z_fractional, 16.0f) - z_fractional);
-  
+
+  if (alt_mode) {
+    x_fractional = 0.0f;
+    y_fractional = 0.0f;
+    z_fractional = 0.0f;
+  }
+
   ParameterInterpolator x_modulation(
       &previous_x_, static_cast<float>(x_integral) + x_fractional, size);
   ParameterInterpolator y_modulation(

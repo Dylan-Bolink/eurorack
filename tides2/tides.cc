@@ -139,6 +139,7 @@ PolySlopeGenerator::OutputSample out[kBlockSize];
 GateFlags no_gate[kBlockSize];
 float ramp[kBlockSize];
 OutputMode previous_output_mode;
+uint8_t previous_alt_mode;
 bool must_reset_ramp_extractor;
 
 void Process(IOBuffer::Block* block, size_t size) {
@@ -220,6 +221,7 @@ void Process(IOBuffer::Block* block, size_t size) {
   }
 
   if (ramp_mode != RAMP_MODE_MOD) {
+    poly_slope_generator.set_alt_mode(settings.state().alt_mode);
     poly_slope_generator.Render(
       ramp_mode,
       output_mode,
@@ -234,11 +236,17 @@ void Process(IOBuffer::Block* block, size_t size) {
       out,
       size);
 
-      // Mix mode: sum all voices into output 1 for frequency modes
-      if (settings.state().mix_mode && output_mode == OUTPUT_MODE_FREQUENCY) {
+      // Alt mode: base, all, odd, even
+      if (settings.state().alt_mode && output_mode == OUTPUT_MODE_FREQUENCY) {
         for (size_t i = 0; i < size; ++i) {
-          out[i].channel[0] = (out[i].channel[0] + out[i].channel[1]
-              + out[i].channel[2] + out[i].channel[3]) * 0.25f;
+          float ch0 = out[i].channel[0];
+          float ch1 = out[i].channel[1];
+          float ch2 = out[i].channel[2];
+          float ch3 = out[i].channel[3];
+          out[i].channel[0] = ch0;
+          out[i].channel[1] = (ch0 + ch1 + ch2 + ch3) * 0.25f;
+          out[i].channel[2] = (ch0 + ch2) * 0.5f;
+          out[i].channel[3] = (ch1 + ch3) * 0.5f;
         }
       }
 
@@ -264,13 +272,23 @@ void Process(IOBuffer::Block* block, size_t size) {
             float g2_frequency = kRoot[state.range] * stmlib::SemitonesToRatio(alt_transposition);
             bool g1_reset = block->input_patched[0] && (block->input[0][0] & stmlib::GATE_FLAG_HIGH);
             bool g2_reset = block->input_patched[1] && (block->input[1][0] & stmlib::GATE_FLAG_HIGH);
+            if (state.alt_mode != previous_alt_mode) {
+              attractors.Init();
+              previous_alt_mode = state.alt_mode;
+            }
             attractors.Reset(g1_reset, g2_reset);
-            attractors.set_lorenz(block->parameters.slope);
-            attractors.set_rossler(block->parameters.smoothness);
+            if (settings.state().alt_mode) {
+              attractors.set_thomas(block->parameters.slope);
+              attractors.set_chua(block->parameters.smoothness);
+            } else {
+              attractors.set_lorenz(block->parameters.slope);
+              attractors.set_rossler(block->parameters.smoothness);
+            }
             attractors.set_gain(block->parameters.shift);
             attractors.set_speed(state.range);
 
-            attractors.Process(g1_frequency, g2_frequency, 0);
+            attractors.Process(g1_frequency, g2_frequency,
+                               settings.state().alt_mode ? 1 : 0);
 
             for (size_t i = 0; i < size; ++i) {
               for (size_t j = 0; j < kNumCvOutputs; ++j) {
@@ -283,7 +301,9 @@ void Process(IOBuffer::Block* block, size_t size) {
           {
             formant.Render(block->parameters, frequency, out,
                             block->input_patched[0] ? block->input[0] : no_gate,
-                            block->input_patched[0], size);
+                            block->input_patched[0],
+                            settings.state().alt_mode,
+                            size);
             for (size_t i = 0; i < size; ++i) {
               for (size_t j = 0; j < kNumCvOutputs; ++j) {
                 block->output[j][i] = settings.dac_code(j, out[i].channel[j]);
@@ -293,7 +313,9 @@ void Process(IOBuffer::Block* block, size_t size) {
           break;
         case OUTPUT_MODE_SLOPE_PHASE:
           {
-            wavetable_engine.Render(block->parameters, frequency, out, block->input_patched[0] ? block->input[0] : no_gate, size);
+            wavetable_engine.Render(block->parameters, frequency, out,
+                block->input_patched[0] ? block->input[0] : no_gate,
+                settings.state().alt_mode, size);
 
             for (size_t j = 0; j < kNumCvOutputs; ++j) {
               for (size_t i = 0; i < size; ++i) {
@@ -324,10 +346,17 @@ void Process(IOBuffer::Block* block, size_t size) {
                 size);
             poly_slope_generator.clear_ratio_override();
 
-            if (settings.state().mix_mode) {
+            // Alt mode: base, all, odd, even
+            if (settings.state().alt_mode) {
               for (size_t i = 0; i < size; ++i) {
-                out[i].channel[0] = (out[i].channel[0] + out[i].channel[1]
-                    + out[i].channel[2] + out[i].channel[3]) * 0.25f;
+                float ch0 = out[i].channel[0];
+                float ch1 = out[i].channel[1];
+                float ch2 = out[i].channel[2];
+                float ch3 = out[i].channel[3];
+                out[i].channel[0] = ch0;
+                out[i].channel[1] = (ch0 + ch1 + ch2 + ch3) * 0.25f;
+                out[i].channel[2] = (ch0 + ch2) * 0.5f;
+                out[i].channel[3] = (ch1 + ch3) * 0.5f;
               }
             }
 
