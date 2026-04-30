@@ -40,6 +40,7 @@ class FormantEngine {
   void Render(
       const Parameters& parameters,
       float f0,
+      float base_freq,
       PolySlopeGenerator::OutputSample* out,
       const stmlib::GateFlags* gate_flags,
       bool trig_patched,
@@ -72,8 +73,7 @@ class FormantEngine {
       const float pw = pw_mod.Next();
       const float shape = shape_mod.Next();
 
-      const float base_rate = 130.81f / 48000.0f;  // middle c
-      const float formant_freq = alt_mode ? ratio * base_rate : f0 * ratio;
+      const float formant_freq = alt_mode ? ratio * base_freq : f0 * ratio;
 
       // Driver oscillator
       bool gate_reset = gate_flags[i] & stmlib::GATE_FLAG_RISING;

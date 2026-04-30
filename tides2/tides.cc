@@ -299,7 +299,9 @@ void Process(IOBuffer::Block* block, size_t size) {
           break;
         case OUTPUT_MODE_AMPLITUDE:
           {
-            formant.Render(block->parameters, frequency, out,
+            formant.Render(block->parameters, frequency,
+                            kRoot[state.range],
+                            out,
                             block->input_patched[0] ? block->input[0] : no_gate,
                             block->input_patched[0],
                             settings.state().alt_mode,
