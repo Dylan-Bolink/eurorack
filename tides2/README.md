@@ -45,11 +45,11 @@ Long-press **Range** again to unlock.
 
 ## Alt Output
 
-Long-press **Output mode** to toggle the alt output. Alt output changes the behavior of the current output mode.
+Long-press **Output** to toggle the alt output. Alt output changes the behavior of the current output mode.
 
 **LED indicator:**
-- When the output mode has a visible LED color: the LED blinks on/off
-- When the output mode LED is normally off: the LED cycles through green, yellow, red as a short flash
+- When the output has a visible LED color: the LED blinks on/off
+- When the output LED is normally off: the LED cycles through green, yellow, red as a short flash
 
 <br>
 
@@ -88,12 +88,18 @@ Mixes voices into outputs.
 
 ## Engines
 
-The first **Ramp mode** (no LED) activates specialized synthesis engines. Each output mode selects a different synthesis engine.
+The new specialized synthesis engines can be selected by setting **Ramp mode** to off (no LED). To select each of the new engines, use the **Output** button with the following options:
 
-<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_0.png" style="width:22px; height: 22px;"> The other engines.<br>
-<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/icon_ad_envelope.png" style="width:22px; height: 22px;"> One-shot unipolar AD envelope generation.<br>
-<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/icon_cyclic.png" style="width:22px; height: 22px;"> Cyclic bipolar oscillations.<br>
-<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/icon_ar_envelope.png" style="width:22px; height: 22px;"> One-shot unipolar AR envelope generation.<br>
+<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_0.png" style="width:22px; height: 22px; margin-right: 5px;"> Attractors<br>
+<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_1.png" style="width:22px; height: 22px; margin-right: 5px;"> Formant<br>
+<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_2.png" style="width:22px; height: 22px; margin-right: 5px;"> Wavetable<br>
+<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_3.png" style="width:22px; height: 22px; margin-right: 5px;"> Chord
+<br>
+<!-- 
+<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_0.png" style="width:22px; height: 22px; margin-right: 5px;"> Synthesis engines.<br>
+<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/icon_ad_envelope.png" style="width:22px; height: 22px; margin-right: 5px;"> One-shot unipolar AD envelope generation.<br>
+<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/icon_cyclic.png" style="width:22px; height: 22px; margin-right: 5px;"> Cyclic bipolar oscillations.<br>
+<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/icon_ar_envelope.png" style="width:22px; height: 22px; margin-right: 5px;"> One-shot unipolar AR envelope generation.<br> -->
 
 <a id="attractors"></a>
 
@@ -124,7 +130,7 @@ Switches from the Lorenz and Rossler pair to Thomas and Chua attractors. Thomas 
 
 ### <img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_1.png" style="width:27px; height: 27px; transform: translateY(5px); margin-right: 5px;"> Formant
 
-A driver oscillator excites a Serge style envelope generator (formant envelope). Serge envelope generators skips a pulse if the envelope is still in an attacking phase. The formant envelope follows the frequency of the driver oscillator except in the alt output.
+A driver oscillator excites a Serge style envelope generator (formant envelope). Serge envelope generators skip a pulse if the envelope is still in an attacking phase. The formant envelope follows the frequency of the driver oscillator except in the alt output.
 
 | Knob | Function |
 |------|----------|
@@ -173,7 +179,7 @@ A 3D wave terrain synthesizer. Three knobs navigate a grid of wavetables.
 | **Slope** | X axis |
 | **Shift** | Y axis |
 | **Shape** | Z axis |
-| **Smoothness** | Smoothness |
+| **Smoothness** | Low-pass filtering |
 
 #### Alt: No Interpolation
 
