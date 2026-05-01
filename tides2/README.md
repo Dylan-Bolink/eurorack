@@ -45,13 +45,12 @@ Long-press **Range** again to unlock.
 
 ## Alt Output
 
-Long-press **Output** to toggle the alt output. Alt output changes the behavior of the current output mode.
+Long-press **Output mode** to toggle the alt output. Alt output changes the behavior of the current output mode.
 
 **LED indicator:**
 - When the output has a visible LED color: the LED blinks on/off
 - When the output LED is normally off: the LED cycles through green, yellow, red as a short flash
 
-<br>
 
 <a id="alt-normal"></a>
 
@@ -88,18 +87,16 @@ Mixes voices into outputs.
 
 ## Engines
 
-The new specialized synthesis engines can be selected by setting **Ramp mode** to off (no LED). To select each of the new engines, use the **Output** button with the following options:
+The new specialized synthesis engines can be selected by setting **Ramp mode** to off (no LED). To select each of the new engines, use the **Output mode** button. 
 
-<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_0.png" style="width:22px; height: 22px; margin-right: 5px;"> Attractors<br>
-<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_1.png" style="width:22px; height: 22px; margin-right: 5px;"> Formant<br>
-<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_2.png" style="width:22px; height: 22px; margin-right: 5px;"> Wavetable<br>
-<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_3.png" style="width:22px; height: 22px; margin-right: 5px;"> Chord
+| Ramp mode | | | Output mode | Engine |
+|---|---|---|---|---|
+| **<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_0.png" style="width:18px; height: 18px;">** | **Engines** | **→** | <img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_0.png" style="width:18px; height: 18px;"> | Attractors |
+| <img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/icon_ad_envelope.png" style="width:18px; height: 18px;"> | AD envelope | | <img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_1.png" style="width:18px; height: 18px;"> | Formant |
+| <img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/icon_cyclic.png" style="width:18px; height: 18px;"> | Cyclic | | <img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_2.png" style="width:18px; height: 18px;"> | Wavetable |
+| <img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/icon_ar_envelope.png" style="width:18px; height: 18px;"> | AR envelope | | <img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_3.png" style="width:18px; height: 18px;"> | Chord |
+
 <br>
-<!-- 
-<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_0.png" style="width:22px; height: 22px; margin-right: 5px;"> Synthesis engines.<br>
-<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/icon_ad_envelope.png" style="width:22px; height: 22px; margin-right: 5px;"> One-shot unipolar AD envelope generation.<br>
-<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/icon_cyclic.png" style="width:22px; height: 22px; margin-right: 5px;"> Cyclic bipolar oscillations.<br>
-<img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/icon_ar_envelope.png" style="width:22px; height: 22px; margin-right: 5px;"> One-shot unipolar AR envelope generation.<br> -->
 
 <a id="attractors"></a>
 
@@ -125,6 +122,8 @@ Two chaotic attractor systems running simultaneously.
 #### Alt: Thomas + Chua
 
 Switches from the Lorenz and Rossler pair to Thomas and Chua attractors. Thomas produces smooth, flowing 3D orbits. Chua is a circuit-based attractor with spikier, more unpredictable behavior.
+
+<br>
 
 <a id="formant"></a>
 
@@ -158,6 +157,7 @@ Patching the **trig** input decouples the formant envelope from the driver oscil
 
 The formant frequency no longer tracks the driver pitch. Instead, **Shift** sets an absolute formant frequency.
 
+<br>
 
 <a id="wavetable"></a>
 
@@ -185,6 +185,8 @@ A 3D wave terrain synthesizer. Three knobs navigate a grid of wavetables.
 
 All interpolation between wavetable positions is removed. X, Y, and Z snap to the nearest grid point.
 
+<br>
+
 <a id="chord"></a>
 
 ### <img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_3.png" style="width:27px; height: 27px; transform: translateY(5px); margin-right: 5px;"> Chord
@@ -203,7 +205,7 @@ Same behavior as the normal frequency alt output:
 | **4** | Even mix (voices 2 + 4) |
 
 
-<br>
+<br><br>
 
 ## Patching Ideas
 
