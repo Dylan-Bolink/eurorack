@@ -372,9 +372,9 @@ void Process(IOBuffer::Block* block, size_t size) {
     float final_x, final_y, final_chaos;
     if (state.grids_knob_swap) {
       // Swapped: grids coords from pot only (CV stays with X params)
-      final_x = cv_reader.channel(ADC_CHANNEL_X_STEPS).unscaled_pot();
-      final_y = cv_reader.channel(ADC_CHANNEL_X_BIAS).unscaled_pot();
-      float chaos_pot = cv_reader.channel(ADC_CHANNEL_X_SPREAD).unscaled_pot();
+      final_x = cv_reader.channel(ADC_CHANNEL_X_STEPS).unscaled_stored_pot();
+      final_y = cv_reader.channel(ADC_CHANNEL_X_BIAS).unscaled_stored_pot();
+      float chaos_pot = cv_reader.channel(ADC_CHANNEL_X_SPREAD).unscaled_stored_pot();
       final_chaos = (chaos_pot - 0.5f) * 2.0f;
 
       // CV swap still routes CV to grids coords when explicitly enabled

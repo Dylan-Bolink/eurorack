@@ -612,6 +612,11 @@ void Ui::OnSwitchReleased(const Event& e) {
     }
     if (e.control_id == SWITCH_X_RANGE) {
       ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_RANGE] = true;
+      // Save old alt values — these are what the "about to go live" side
+      // was using, and we need them for catch-up to prevent parameter jumps.
+      float old_steps = static_cast<float>(state->x_steps_alt) / 255.0f;
+      float old_bias = static_cast<float>(state->x_bias_alt) / 255.0f;
+      float old_spread = static_cast<float>(state->x_spread_alt) / 255.0f;
       // Capture current knob positions into alt fields before swapping
       // (the fields switch meaning, so initialize with current ADC values)
       state->x_steps_alt = static_cast<uint8_t>(
@@ -621,6 +626,11 @@ void Ui::OnSwitchReleased(const Event& e) {
       state->x_spread_alt = static_cast<uint8_t>(
           cv_reader_->channel(ADC_CHANNEL_X_SPREAD).unscaled_pot() * 255.0f);
       state->grids_knob_swap = !state->grids_knob_swap;
+      // Start catch-up from old alt values so the side that just switched
+      // to live pot reading doesn't jump to the physical knob position.
+      cv_reader_->mutable_channel(ADC_CHANNEL_X_STEPS)->CatchUpFrom(old_steps);
+      cv_reader_->mutable_channel(ADC_CHANNEL_X_BIAS)->CatchUpFrom(old_bias);
+      cv_reader_->mutable_channel(ADC_CHANNEL_X_SPREAD)->CatchUpFrom(old_spread);
       grids_save_flag_ = true;
       return;
     }
