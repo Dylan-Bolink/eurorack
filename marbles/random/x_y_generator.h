@@ -34,13 +34,10 @@
 #include "marbles/ramp/ramp_divider.h"
 #include "marbles/ramp/ramp_extractor.h"
 #include "marbles/random/output_channel.h"
-#include "marbles/random/quantizer.h"
 #include "marbles/random/random_sequence.h"
 #include "marbles/random/t_generator.h"
 
 namespace marbles {
-
-const int kNumStoredScales = 6;
 
 enum VoltageRange {
   VOLTAGE_RANGE_NARROW,  // +2V
@@ -61,8 +58,7 @@ enum ControlMode {
   CONTROL_MODE_BUMP,          // 1 - solid yellow
   CONTROL_MODE_TILT,          // 2 - solid red
   CONTROL_MODE_ROUND_ROBIN,   // 3 - blinking green
-  CONTROL_MODE_ENVELOPE,      // 4 - blinking yellow
-  CONTROL_MODE_CHORD          // 5 - blinking red
+  CONTROL_MODE_ENVELOPE       // 4 - blinking yellow
 };
 
 enum OutputGroup {
@@ -133,9 +129,6 @@ class XYGenerator {
     for (size_t i = 0; i < kNumXChannels; ++i) {
       output_channel_[i].LoadScale(scale_index, scale);
     }
-    if (scale_index < kNumStoredScales) {
-      stored_scales_[scale_index] = scale;
-    }
   }
   
  private:
@@ -155,8 +148,6 @@ class XYGenerator {
   float env_phase_[kNumXChannels];
   float env_rate_[kNumXChannels];
   float env_prev_ramp_[kNumXChannels];
-
-  Scale stored_scales_[kNumStoredScales];
 
   DISALLOW_COPY_AND_ASSIGN(XYGenerator);
 };

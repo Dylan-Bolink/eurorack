@@ -41,37 +41,6 @@ namespace marbles {
 using namespace std;
 using namespace stmlib;
 
-const int kChordNumChords = 12;
-const int kChordNumNotes = 4;
-
-// 12 chords
-const float chords[kChordNumChords][kChordNumNotes] = {
-  { 0.0f,  3.0f,  6.0f,  9.0f },   // dim7
-  { 0.0f,  3.0f,  6.0f, 10.0f },   // half-dim
-  { 0.0f,  3.0f,  7.0f, 10.0f },   // m7
-  { 0.0f,  3.0f,  7.0f, 11.0f },   // mMaj7
-  { 0.0f,  3.0f,  7.0f, 12.0f },   // min triad
-  { 0.0f,  5.0f,  7.0f, 10.0f },   // sus4
-  { 0.0f,  5.0f, 10.0f, 15.0f },   // quartal
-  { 0.0f,  2.0f,  7.0f, 14.0f },   // sus2
-  { 0.0f,  7.0f, 12.0f, 19.0f },   // power open fith
-  { 0.0f,  4.0f,  7.0f, 12.0f },   // maj triad
-  { 0.0f,  4.0f,  7.0f, 10.0f },   // Dom7
-  { 0.0f,  4.0f,  7.0f, 11.0f },   // Maj7
-};
-
-// 8 pure 7th chords (Harmonaig style), ordered minor<->major
-// const float chords[kChordNumChords][kChordNumNotes] = {
-//   { 0.0f,  3.0f,  6.0f,  9.0f },   // dim7
-//   { 0.0f,  3.0f,  6.0f, 10.0f },   // half-dim (m7b5)
-//   { 0.0f,  3.0f,  7.0f, 10.0f },   // m7
-//   { 0.0f,  3.0f,  7.0f, 11.0f },   // mMaj7
-//   { 0.0f,  4.0f,  7.0f, 10.0f },   // Dom7
-//   { 0.0f,  4.0f,  7.0f, 11.0f },   // Maj7
-//   { 0.0f,  4.0f,  8.0f, 11.0f },   // augMaj7
-//   { 0.0f,  4.0f,  8.0f, 10.0f },   // aug7
-// };
-
 
 void XYGenerator::Init(RandomStream* random_stream, float sr) {
   for (size_t i = 0; i < kNumChannels; ++i) {
@@ -92,9 +61,6 @@ void XYGenerator::Init(RandomStream* random_stream, float sr) {
   fill(&env_phase_[0], &env_phase_[kNumXChannels], 1.0f);
   fill(&env_rate_[0], &env_rate_[kNumXChannels], 0.0f);
   fill(&env_prev_ramp_[0], &env_prev_ramp_[kNumXChannels], 0.0f);
-  for (int i = 0; i < kNumStoredScales; ++i) {
-    stored_scales_[i].Init();
-  }
 }
 
 const uint32_t hashes[kNumXChannels] = {
@@ -219,13 +185,9 @@ void XYGenerator::Process(
     
     channel.set_spread(0.5f + (settings.spread - 0.5f) * amount);
     channel.set_bias(0.5f + (settings.bias - 0.5f) * amount);
-    if (settings.control_mode == CONTROL_MODE_CHORD) {
-      channel.set_steps(0.75f);  // amount=0.5 → all diatonic degrees
-    } else {
-      channel.set_steps(0.5f + (settings.steps - 0.5f) * \
-          (settings.register_mode ? 1.0f : amount));
-    }
-    channel.set_scale_index(settings.scale_index > 5 ? 0 : settings.scale_index);
+    channel.set_steps(0.5f + (settings.steps - 0.5f) * \
+        (settings.register_mode ? 1.0f : amount));
+    channel.set_scale_index(settings.scale_index);
     channel.set_register_mode(settings.register_mode);
     channel.set_register_value(settings.register_value);
     channel.set_register_transposition(
@@ -251,8 +213,7 @@ void XYGenerator::Process(
         use_shifted_sequences = true;
 
         if (settings.control_mode == CONTROL_MODE_IDENTICAL
-            || settings.control_mode == CONTROL_MODE_ROUND_ROBIN
-            || settings.control_mode == CONTROL_MODE_CHORD) {
+            || settings.control_mode == CONTROL_MODE_ROUND_ROBIN) {
           sequence->ReplayShifted(i);
         } else if (settings.control_mode == CONTROL_MODE_BUMP) {
           sequence->ReplayShifted(i == 2 ? 1 : 0);
@@ -270,9 +231,7 @@ void XYGenerator::Process(
     use_shifted_sequences_[i] = use_shifted_sequences;
     
     if (x_settings.control_mode == CONTROL_MODE_ENVELOPE && i < kNumXChannels) {
-      // Envelope mode: skip 
-    } else if (x_settings.control_mode == CONTROL_MODE_CHORD && i < kNumXChannels) {
-      // Chord mode: skip
+      // Envelope mode: skip
     } else if (x_settings.control_mode == CONTROL_MODE_ROUND_ROBIN
         && i < kNumXChannels
         && i != static_cast<size_t>(rr_counter_)) {
@@ -389,79 +348,6 @@ void XYGenerator::Process(
     }
     for (size_t ch = 0; ch < kNumXChannels; ch++) {
       env_prev_ramp_[ch] = channel_ramp[ch][size - 1];
-    }
-  }
-
-  if (x_settings.control_mode == CONTROL_MODE_CHORD) {
-    bool chromatic = (x_settings.scale_index > 5);
-    float spread_centered = x_settings.spread - 0.5f;
-    if (spread_centered > -0.05f && spread_centered < 0.05f) spread_centered = 0.0f;
-    float transpose = spread_centered * 2.0f;
-
-    // Inversion 0-3 from X Range switch
-    int inversion = static_cast<int>(x_settings.voltage_range);
-    CONSTRAIN(inversion, 0, 3);
-
-    // Steps chord quality index
-    int chord_idx = static_cast<int>(x_settings.steps * (kChordNumChords - 1) + 0.5f);
-    CONSTRAIN(chord_idx, 0, kChordNumChords - 1);
-
-    for (size_t s = 0; s < size; s++) {
-      size_t base = s * kNumChannels;
-
-      float root = 10.0f * (x_settings.register_value - 0.5f);
-      root += transpose;
-      // root += 1.15f / 12.0f;  // compensate hardware ADC offset
-
-      // Build voices
-      float voices[3];
-      float base_interval;
-      if (chromatic) {
-        root = roundf(root * 12.0f) / 12.0f;
-        base_interval = 1.0f;
-        for (int v = 0; v < 3; v++)
-          voices[v] = root + chords[chord_idx][v + 1] / 12.0f;
-      } else {
-        base_interval = stored_scales_[x_settings.scale_index].base_interval;
-        root = output_channel_[0].Quantize(root, 0.5f);
-        for (int v = 0; v < 3; v++)
-          voices[v] = output_channel_[0].Quantize(root + chords[chord_idx][v + 1] / 12.0f, 0.5f);
-      }
-
-      // Spread: CCW=closed, noon=closed, past noon=drop2, CW=open
-      int voicing = 0;
-      if (x_settings.bias > 0.75f) voicing = 3;      // open
-      else if (x_settings.bias > 0.5f) voicing = 1;  // drop2
-
-      switch (voicing) {
-        case 1: // Drop 2
-          voices[1] -= base_interval;
-          if (voices[1] < voices[0]) { float t = voices[0]; voices[0] = voices[1]; voices[1] = t; }
-          break;
-        case 2: // Drop 3
-          voices[0] -= base_interval;
-          break;
-        case 3: // Open: drop 2 + raise highest
-          voices[1] -= base_interval;
-          if (voices[1] < voices[0]) { float t = voices[0]; voices[0] = voices[1]; voices[1] = t; }
-          voices[2] += base_interval;
-          break;
-        default:
-          break;
-      }
-
-      // Apply inversion
-      for (int inv = 0; inv < inversion; inv++) {
-        voices[0] += base_interval;
-        if (voices[0] > voices[1]) { float t = voices[0]; voices[0] = voices[1]; voices[1] = t; }
-        if (voices[1] > voices[2]) { float t = voices[1]; voices[1] = voices[2]; voices[2] = t; }
-        if (voices[0] > voices[1]) { float t = voices[0]; voices[0] = voices[1]; voices[1] = t; }
-      }
-
-      output[base + 3] = root;
-      output[base + 0] = voices[0];
-      output[base + 1] = voices[1];
-      output[base + 2] = voices[2];
     }
   }
 

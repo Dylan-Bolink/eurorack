@@ -392,7 +392,7 @@ void Process(IOBuffer::Block* block, size_t size) {
         final_y += cv_reader.channel(ADC_CHANNEL_T_JITTER).cv();
         CONSTRAIN(final_y, 0.0f, 1.0f);
       }
-      if (settings.grids_chaos_cv_swap() == 1 && !state.x_register_mode) {
+      if (settings.grids_chaos_cv_swap() == 1 && state.x_register_mode == X_REGISTER_MODE_OFF) {
         final_chaos += cv_reader.channel(ADC_CHANNEL_X_SPREAD).cv();
         CONSTRAIN(final_chaos, -1.0f, 1.0f);
       } else if (settings.grids_chaos_cv_swap() == 2) {
@@ -425,7 +425,7 @@ void Process(IOBuffer::Block* block, size_t size) {
       }
 
       // Chaos CV: 0=off, 1=spread, 2=rate
-      if (settings.grids_chaos_cv_swap() == 1 && !state.x_register_mode) {
+      if (settings.grids_chaos_cv_swap() == 1 && state.x_register_mode == X_REGISTER_MODE_OFF) {
         final_chaos += cv_reader.channel(ADC_CHANNEL_X_SPREAD).cv();
         CONSTRAIN(final_chaos, -1.0f, 1.0f);
       } else if (settings.grids_chaos_cv_swap() == 2) {
@@ -495,11 +495,7 @@ void Process(IOBuffer::Block* block, size_t size) {
   // Generate voltages for X-section (40%).
   float note_cv_1 = cv_reader.channel(ADC_CHANNEL_X_SPREAD).scaled_raw_cv();
   float note_cv_2 = cv_reader.channel(ADC_CHANNEL_X_SPREAD_2).scaled_raw_cv();
-  // In chord mode the spread jack is the 1:1 root input — don't mix in the
-  // Deja Vu Length channel (ADC_CHANNEL_X_SPREAD_2), which would add a knob offset.
-  float note_cv = (state.x_control_mode == CONTROL_MODE_CHORD)
-      ? note_cv_1
-      : 0.5f * (note_cv_1 + note_cv_2);
+  float note_cv = 0.5f * (note_cv_1 + note_cv_2);
   float u = note_filter.Process(0.5f * (note_cv + 1.0f));
 
   // V/Oct correction curve
@@ -543,26 +539,14 @@ void Process(IOBuffer::Block* block, size_t size) {
     fill(&voltages[0], &voltages[4 * size], voltage);
   } else {
     x.control_mode = ControlMode(state.x_control_mode);
-    bool is_voct_offset = false;
-
-    if (x.control_mode == CONTROL_MODE_CHORD) {
-      // Chord mode: inversion
-      x.voltage_range = VoltageRange(state.x_range);
-      x.register_mode = (xy_clock_source == CLOCK_SOURCE_EXTERNAL);
-      x.use_shift_register = x.register_mode;
-      x.register_value = u;
-      // Spread jack = 1:1 root input (bypass attenuverter)
-      cv_reader.set_attenuverter(ADC_CHANNEL_X_SPREAD, 0.5f);
-    } else {
-      x.voltage_range = VoltageRange(state.x_range % 3);
-      bool is_register = (state.x_register_mode == X_REGISTER_MODE_REGISTER);
-      is_voct_offset = (state.x_register_mode == X_REGISTER_MODE_VOCT_OFFSET);
-      x.register_mode = is_register;
-      x.use_shift_register = is_register || is_voct_offset;
-      x.register_value = u;
-      cv_reader.set_attenuverter(
-          ADC_CHANNEL_X_SPREAD, (is_register || is_voct_offset) ? 0.5f : 1.0f);
-    }
+    x.voltage_range = VoltageRange(state.x_range % 3);
+    bool is_register = (state.x_register_mode == X_REGISTER_MODE_REGISTER);
+    bool is_voct_offset = (state.x_register_mode == X_REGISTER_MODE_VOCT_OFFSET);
+    x.register_mode = is_register;
+    x.use_shift_register = is_register || is_voct_offset;
+    x.register_value = u;
+    cv_reader.set_attenuverter(
+        ADC_CHANNEL_X_SPREAD, (is_register || is_voct_offset) ? 0.5f : 1.0f);
 
     if (grids_mode && state.grids_knob_swap) {
       // Swapped: X params from stored alt fields + CV from jacks
@@ -673,7 +657,7 @@ void Process(IOBuffer::Block* block, size_t size) {
     block->cv_output[2][i] = DacCode(2, val_x2 + voct_offset); // X2
     block->cv_output[3][i] = DacCode(3, val_x3 + voct_offset); // X3
     
-    if (grids_mode && state.x_control_mode != CONTROL_MODE_CHORD) {
+    if (grids_mode) {
       float accent_voltage = 0.0f;
       bool current_accent = accent_cv_delay_tail[0];
       uint8_t variation = state.grids_accent_variation;

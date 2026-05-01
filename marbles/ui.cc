@@ -355,32 +355,13 @@ void Ui::UpdateLEDs() {
           if (mode_ == UI_MODE_NORMAL) {
             if (state.x_control_mode == 4) {  // CONTROL_MODE_ENVELOPE
               leds_.set(LED_X_RANGE, MakeColor(state.x_range, cb));
-            } else if (state.x_control_mode == 5) {  // CONTROL_MODE_CHORD
-              if (state.x_scale >= 6) {
-                leds_.set(LED_X_RANGE, LED_COLOR_OFF);  // chromatic
-              } else {
-                leds_.set(LED_X_RANGE, scale_color);
-              }
             } else {
               leds_.set(LED_X_RANGE,
                         state.x_register_mode == X_REGISTER_MODE_REGISTER
                             ? LED_COLOR_OFF
                             : MakeColor(state.x_range, cb));
             }
-            if (state.x_control_mode == 5) {  // CONTROL_MODE_CHORD only (inversion via x_range)
-              int inv = state.x_range;
-              if (inv == 0) {
-                leds_.set(LED_X_EXT, LED_COLOR_OFF);
-              } else {
-                uint32_t phase = system_clock.milliseconds() % 1000;
-                bool led_on = false;
-                for (int b = 0; b < inv; b++) {
-                  uint32_t start = b * 200;
-                  if (phase >= start && phase < start + 100) led_on = true;
-                }
-                leds_.set(LED_X_EXT, led_on ? LED_COLOR_GREEN : LED_COLOR_OFF);
-              }
-            } else {
+            {
               LedColor x_ext_color = LED_COLOR_OFF;
               if (state.x_register_mode == X_REGISTER_MODE_REGISTER) {
                 x_ext_color = LED_COLOR_GREEN;
@@ -667,14 +648,18 @@ void Ui::OnSwitchReleased(const Event& e) {
     
     case SWITCH_T_MODEL:
       {
+        bool is_long = e.data >= kLongPressDuration;
+        bool is_tap = e.data < 275;
+        if (!is_long && !is_tap) break;
         uint8_t bank = state->t_model / 3;
         if (bank) {
-          // In Grids mode: only long press (>=2s) exits
-          if (e.data >= kLongPressDuration) {
+          if (is_long) {
             state->t_model -= 3;
+          } else {
+            state->t_model = 3 + (state->t_model - 3 + 1) % 3;
           }
         } else {
-          if (e.data >= kLongPressDuration) {
+          if (is_long) {
             state->t_model += 3;
           } else {
             state->t_model = (state->t_model + 1) % 3;
@@ -696,12 +681,22 @@ void Ui::OnSwitchReleased(const Event& e) {
       break;
     
     case SWITCH_X_MODE:
-      // In Grids mode, only cycle on short tap
-      if (state->t_model != T_GENERATOR_MODEL_GRIDS || e.data < 275) {
-        state->x_control_mode = (state->x_control_mode + 1) % 6;
-        
-        if (state->x_control_mode != 4 && state->x_control_mode != 5 && state->x_scale > 5) {
-          state->x_scale = 5;  // clamp chromatic back to last preset
+      {
+        bool is_long = e.data >= kLongPressDuration;
+        bool is_tap = e.data < 275;
+        if (!is_long && !is_tap) break;
+        if (state->x_control_mode >= 3) {
+          if (is_long) {
+            state->x_control_mode -= 3;
+          } else {
+            state->x_control_mode = 3 + (state->x_control_mode - 3 + 1) % 2;
+          }
+        } else {
+          if (is_long) {
+            state->x_control_mode = 3;
+          } else {
+            state->x_control_mode = (state->x_control_mode + 1) % 3;
+          }
         }
         SaveState();
       }
@@ -726,11 +721,7 @@ void Ui::OnSwitchReleased(const Event& e) {
         mode_ = UI_MODE_RECORD_SCALE;
         scale_recorder_->Clear();
       } else {
-        if (state->x_control_mode == 5) {  // CONTROL_MODE_CHORD only
-          state->x_range = (state->x_range + 1) % 4;  // inversion 0-3
-        } else {
-          state->x_register_mode = (state->x_register_mode + 1) % X_REGISTER_MODE_LAST;
-        }
+        state->x_register_mode = (state->x_register_mode + 1) % X_REGISTER_MODE_LAST;
         SaveState();
       }
       break;
@@ -741,10 +732,6 @@ void Ui::OnSwitchReleased(const Event& e) {
       } else if (state->x_control_mode == 4) {  // CONTROL_MODE_ENVELOPE
         if (e.data < kLongPressDuration) {
           state->x_range = (state->x_range + 1) % 3;  // retrigger mode
-        }
-      } else if (state->x_control_mode == 5) {  // CONTROL_MODE_CHORD
-        if (e.data < kLongPressDuration) {
-          state->x_scale = (state->x_scale + 1) % 7;  // 0-5 scales, 6 chromatic
         }
       } else if (e.data >= kLongPressDuration) {
         if (mode_ == UI_MODE_NORMAL) {
