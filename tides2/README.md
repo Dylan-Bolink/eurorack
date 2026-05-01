@@ -5,7 +5,7 @@
 <br>
 
 For the latest update file go to the [**release page**](https://github.com/Dylan-Bolink/eurorack/releases).<br>
-For the orginal Tides manual go to the [**Tides manual**](https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/manual/).
+For the original Tides manual go to the [**Tides manual**](https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/manual/).
 
 <br>
 
@@ -48,8 +48,8 @@ Long-press **Range** again to unlock.
 Long-press **Output mode** to toggle the alt output. Alt output changes the behavior of the current output mode.
 
 **LED indicator:**
-- When the output has a visible LED color: the LED blinks on/off
-- When the output LED is normally off: the LED cycles through green, yellow, red as a short flash
+- When the output mode has a visible LED color: the LED blinks on/off
+- When the output mode LED is normally off: the LED cycles through green, yellow, red as a short flash
 
 <br>
 
@@ -88,7 +88,7 @@ Mixes voices into outputs.
 
 ## Engines
 
-The first **Ramp mode** (no LED) activates specialized synthesis engines. Each output mode selects a different engine.
+The first **Ramp mode** (no LED) activates specialized synthesis engines. Each output mode selects a different synthesis engine.
 
 <img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_0.png" style="width:22px; height: 22px;"> The other engines.<br>
 <img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/icon_ad_envelope.png" style="width:22px; height: 22px;"> One-shot unipolar AD envelope generation.<br>
@@ -124,7 +124,7 @@ Switches from the Lorenz and Rossler pair to Thomas and Chua attractors. Thomas 
 
 ### <img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_1.png" style="width:27px; height: 27px; transform: translateY(5px); margin-right: 5px;"> Formant
 
-A driver oscillator excites a Serge style envelope generator (formant envelope). Serge envelope generaters skips pulses if the envelope is stil in a attacking phase. The formant envelope follows the frequency of the driver oscillator except in the alt output.
+A driver oscillator excites a Serge style envelope generator (formant envelope). Serge envelope generators skips a pulse if the envelope is still in an attacking phase. The formant envelope follows the frequency of the driver oscillator except in the alt output.
 
 | Knob | Function |
 |------|----------|
@@ -141,7 +141,7 @@ A driver oscillator excites a Serge style envelope generator (formant envelope).
 | **3** | Pulse wave (driver) |
 | **4** | Sine wave (driver) |
 
-> The logic combined pulse is a 3 state pulse wave where smoothness attenuates it at the first half. The second half of smoothness introduces a sub square oscillator.
+> The logic combined pulse is a 3 state pulse wave. The first half of smoothness attenuates the pulse; the second half introduces a sub-octave square.
 
 > With the **shift** attenuverter fully open, the **shift** CV input tracks approximately v/oct.
 
