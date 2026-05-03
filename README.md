@@ -69,11 +69,17 @@ The **X Mode** button now has 5 modes split into two banks:
 
 > Short tap cycles within the current bank. Long press switches between banks.
 
-#### Round Robin (Blinking green)
+<br>
 
-Cycles through X1/X2/X3 outputs one at a time. Each clock pulse advances to the next channel. When clock is not patced the clocking signal comes from T2.
+### Round Robin (Blinking green)
 
-#### Envelope (Blinking orange)
+Cycles through X1/X2/X3 outputs one at a time. Each clock pulse advances to the next channel. When clock is not patched the clocking signal comes from T2.
+
+> In normal green mode, all three X outputs share the same random sequence in a shift-register style — X1 gets the newest value, X2 gets the previous, and X3 the one before that. In round robin, only one output updates per clock tick while the other two hold their last value, cycling X1 → X2 → X3.
+
+<br>
+
+### Envelope (Blinking orange)
 
 Generates attack-decay envelopes on X outputs triggered by t1t2t3 or clock input.
 
@@ -83,7 +89,6 @@ Generates attack-decay envelopes on X outputs triggered by t1t2t3 or clock input
 | **Bias** | Envelope length |
 | **Steps** | Attack/decay ratio |
 
-> Output is fixed at 5V scale.
 
 **X Range** changes retrigger behavior:
 
@@ -94,6 +99,8 @@ Generates attack-decay envelopes on X outputs triggered by t1t2t3 or clock input
 | Red (full) | Only retrigger after envelope completes (legato) |
 
 > With external clock, envelopes trigger round-robin style (one channel per trigger). With internal clock, all channels trigger independently.
+
+<br>
 
 ### X Ext Modes
 
@@ -107,20 +114,20 @@ Generates attack-decay envelopes on X outputs triggered by t1t2t3 or clock input
 
 > In **Transpose** mode, the Spread CV input applies a pitch offset to all three X outputs. The input uses a V/Oct correction curve for tracking accuracy. While the hardware is not made for it this curve tries to fix that.
 
+<br>
+
 ### Explicit Reset
 
 Press **T Mode** + **X Mode** to cycle through 4 states:
 
-| State | LED Color | T Section Reset | X Section Reset |
-|-------|-----------|-----------------|-----------------|
+| State  | T Section Reset | X Section Reset |
+|-------|-----------------|-----------------|
 | Off | Disabled | Disabled |
-| 1 | Green | Enabled (T Jitter input) | Disabled |
-| 2 | Orange | Disabled | Enabled (X Steps input) |
-| 3 | Red | Enabled | Enabled |
+| 1 | Enabled (T Jitter input) | Disabled |
+| 2 | Disabled | Enabled (X Steps input) |
+| 3 | Enabled | Enabled |
 
 > After toggling, **T Deja Vu** and **X Deja Vu** LEDs flash for 1 second to indicate which sections are active.
-
-> Original Marbles 1.3 only had on or off.
 
 <br>
 
@@ -130,7 +137,7 @@ Long press **T Mode** while on drum mode (solid red) to enter Grids mode (blinki
 
 > To exit, long press **T Mode** without changing anything in the advanced layer.
 
-## Outputs
+## Grids mode outputs
 
 | Output | Function |
 |--------|----------|
@@ -320,7 +327,7 @@ Hold **X Mode** + tap **T Mode** to cycle through pattern banks:
 | **X Deja Vu** | Loop start | Dynamic (from current step) | Always from beat 1 |
 | **T Range** | Read mode | Normal | Henri |
 | **X Ext** | Accent hang | Normal gates | Hanging accents |
-| **X Range** | Knob swap | Off | On (LED green) |
+| **X Range** | Knob swap | Normal knob locations | Knobs swapped |
 | **X Mode** | Explicit reset | Off | 4 states (see [Explicit Reset](#explicit-reset)) |
 
 ### Setting Descriptions
