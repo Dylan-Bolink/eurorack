@@ -441,13 +441,18 @@ void Ui::UpdateLEDs() {
       
   }
 
-  // Explicit reset animmation which side.
+  // Explicit reset animation which side.
   if (mode_ == UI_MODE_NORMAL && explicit_reset_flash_time_ != 0) {
     uint32_t elapsed = system_clock.milliseconds() - explicit_reset_flash_time_;
     if (elapsed < 1000) {
       uint8_t er = settings_->state().explicit_reset;
       leds_.set(LED_T_DEJA_VU, (er & 1) && fast_blink ? LED_COLOR_GREEN : LED_COLOR_OFF);
       leds_.set(LED_X_DEJA_VU, (er & 2) && fast_blink ? LED_COLOR_GREEN : LED_COLOR_OFF);
+
+      if (state.t_model != T_GENERATOR_MODEL_GRIDS) {
+        leds_.set(LED_T_MODEL, fast_blink ? LED_COLOR_YELLOW : LED_COLOR_OFF);
+        leds_.set(LED_X_CONTROL_MODE, fast_blink ? LED_COLOR_YELLOW : LED_COLOR_OFF);
+      }
     } else {
       explicit_reset_flash_time_ = 0;
     }
