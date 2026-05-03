@@ -623,7 +623,7 @@ void Process(IOBuffer::Block* block, size_t size) {
     bool x_reset_cv_available = !(grids_mode && settings.grids_x_cv_swap() == 1);
     bool x_section_reset = (settings.explicit_reset() & 2) && x_reset_cv_available &&
       hidden_gates[ADC_CHANNEL_X_STEPS] & GATE_FLAG_RISING;
-    if (xy_clock_source != CLOCK_SOURCE_EXTERNAL) {
+    if (xy_clock_source != CLOCK_SOURCE_EXTERNAL && (settings.explicit_reset() & 2)) {
       x_section_reset |= t_section_reset;
     }
 
