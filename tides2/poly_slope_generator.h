@@ -279,9 +279,15 @@ class PolySlopeGenerator {
       const float fold = fold_modulation.Next();
 
       float per_channel_pw[num_channels];
-      const float pw_increment = (shift > 0.0f ? (1.0f - pw) : pw) * step;
-      for (size_t j = 0; j < num_channels; ++j) {
-        per_channel_pw[j] = pw + pw_increment * float(j);
+      if (output_mode == OUTPUT_MODE_SLOPE_PHASE && alt_mode_) {
+        for (size_t j = 0; j < num_channels; ++j) {
+          per_channel_pw[j] = pw;
+        }
+      } else {
+        const float pw_increment = (shift > 0.0f ? (1.0f - pw) : pw) * step;
+        for (size_t j = 0; j < num_channels; ++j) {
+          per_channel_pw[j] = pw + pw_increment * float(j);
+        }
       }
 
       // Increment ramps.
@@ -360,9 +366,9 @@ class PolySlopeGenerator {
         if (alt_mode_) {
           // Alt: shift controls shape spread, no phase offset
           for (size_t j = 0; j < num_channels; ++j) {
-            float ch_shape = shape + static_cast<float>(j) * shift;
-            while (ch_shape >= 12.0f) ch_shape -= 12.0f;
-            while (ch_shape < 0.0f) ch_shape += 12.0f;
+            float ch_shape = shape + static_cast<float>(j) * shift * 3.667f;
+            while (ch_shape >= 11.0f) ch_shape -= 11.0f;
+            while (ch_shape < 0.0f) ch_shape += 11.0f;
             MAKE_INTEGRAL_FRACTIONAL(ch_shape);
             const int16_t* ch_table = &lut_wavetable[ch_shape_integral * 1025];
             size_t source = ramp_mode == RAMP_MODE_AR ? j : 0;
@@ -372,7 +378,7 @@ class PolySlopeGenerator {
                         ramp_generator_.phase(source),
                         0.0f,
                         ramp_generator_.frequency(source),
-                        ramp_mode == RAMP_MODE_AD ? per_channel_pw[j] : pw),
+                        pw),
                     ch_table,
                     ch_shape_fractional),
                 fold);
