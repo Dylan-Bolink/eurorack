@@ -446,8 +446,8 @@ void Ui::UpdateLEDs() {
     uint32_t elapsed = system_clock.milliseconds() - explicit_reset_flash_time_;
     if (elapsed < 1000) {
       uint8_t er = settings_->state().explicit_reset;
-      if (er & 1) leds_.set(LED_T_DEJA_VU, fast_blink ? LED_COLOR_GREEN : LED_COLOR_OFF);
-      if (er & 2) leds_.set(LED_X_DEJA_VU, fast_blink ? LED_COLOR_GREEN : LED_COLOR_OFF);
+      leds_.set(LED_T_DEJA_VU, (er & 1) && fast_blink ? LED_COLOR_GREEN : LED_COLOR_OFF);
+      leds_.set(LED_X_DEJA_VU, (er & 2) && fast_blink ? LED_COLOR_GREEN : LED_COLOR_OFF);
     } else {
       explicit_reset_flash_time_ = 0;
     }
@@ -601,11 +601,11 @@ void Ui::OnSwitchReleased(const Event& e) {
       // Capture current knob positions into alt fields before swapping
       // (the fields switch meaning, so initialize with current ADC values)
       state->x_steps_alt = static_cast<uint8_t>(
-          cv_reader_->channel(ADC_CHANNEL_X_STEPS).unscaled_pot() * 255.0f);
+          cv_reader_->channel(ADC_CHANNEL_X_STEPS).unscaled_stored_pot() * 255.0f);
       state->x_bias_alt = static_cast<uint8_t>(
-          cv_reader_->channel(ADC_CHANNEL_X_BIAS).unscaled_pot() * 255.0f);
+          cv_reader_->channel(ADC_CHANNEL_X_BIAS).unscaled_stored_pot() * 255.0f);
       state->x_spread_alt = static_cast<uint8_t>(
-          cv_reader_->channel(ADC_CHANNEL_X_SPREAD).unscaled_pot() * 255.0f);
+          cv_reader_->channel(ADC_CHANNEL_X_SPREAD).unscaled_stored_pot() * 255.0f);
       state->grids_knob_swap = !state->grids_knob_swap;
       // Start catch-up from old alt values so the side that just switched
       // to live pot reading doesn't jump to the physical knob position.

@@ -301,10 +301,10 @@ void XYGenerator::Process(
           time_value += bernoulli_amount * (bernoulli_value - time_value);
 
           // Skip fastest 20% of time range
-          time_value = 0.2f + time_value * 0.8f;
+          time_value = 0.3f + time_value * 0.7f;
 
           env_rate_[ch] = (1.0f / 32.0f)
-              * SemitonesToRatioSafe(-156.0f * time_value);
+              * SemitonesToRatioSafe(-180.0f * time_value);
           env_phase_[ch] = 0.0f;
         }
 
@@ -314,7 +314,7 @@ void XYGenerator::Process(
 
         if (phase < 1.0f) {
           float attack_fraction = steps;
-          CONSTRAIN(attack_fraction, 0.001f, 0.999f);
+          CONSTRAIN(attack_fraction, 0.001f, 0.9f);
 
           if (phase < attack_fraction) {
             // Attack phase
@@ -332,8 +332,6 @@ void XYGenerator::Process(
             float t_warped = t + snap * (t_fast - t);
             value = 1.0f - Interpolate(lut_raised_cosine, t_warped, 256.0f);
           }
-        } else {
-          value = (steps > 0.99f) ? 1.0f : 0.0f;
         }
 
         CONSTRAIN(value, 0.0f, 1.0f);
