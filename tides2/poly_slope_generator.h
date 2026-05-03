@@ -367,8 +367,11 @@ class PolySlopeGenerator {
           // Alt: shift controls shape spread, no phase offset
           for (size_t j = 0; j < num_channels; ++j) {
             float ch_shape = shape + static_cast<float>(j) * shift * 3.667f;
-            while (ch_shape >= 11.0f) ch_shape -= 11.0f;
-            while (ch_shape < 0.0f) ch_shape += 11.0f;
+            // Ping-pong fold into [0, 11) to avoid click at wrap
+            while (ch_shape < 0.0f) ch_shape += 22.0f;
+            while (ch_shape >= 22.0f) ch_shape -= 22.0f;
+            ch_shape = ch_shape < 11.0f ? ch_shape : 22.0f - ch_shape;
+            if (ch_shape >= 11.0f) ch_shape = 10.9999f;
             MAKE_INTEGRAL_FRACTIONAL(ch_shape);
             const int16_t* ch_table = &lut_wavetable[ch_shape_integral * 1025];
             size_t source = ramp_mode == RAMP_MODE_AR ? j : 0;

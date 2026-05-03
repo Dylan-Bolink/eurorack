@@ -36,7 +36,7 @@ Long-press **Range** again to unlock.
 | Color | Function | Range |
 |-------|----------|--------|
 | **Green** | Semitones | +- 1 octave |
-| **Yellow** | Fifths and octaves | +- 2 octaves |
+| **Orange** | Fifths and octaves | +- 2 octaves |
 | **Red** | Octaves | +- 4 octaves |
 
 > Patching a cable into **Clock** exits frequency lock since you enter [**clocked speed**](https://arc.net/l/quote/tgzhboie) from the original firmware.
@@ -49,7 +49,7 @@ Long-press **Output mode** to toggle the alt output. Alt output changes the beha
 
 **LED indicator:**
 - When the output has a visible LED color: the LED blinks on/off
-- When the output LED is normally off: the LED cycles through green, yellow, red as a short flash
+- When the output LED is normally off: the LED cycles through green, orange, red as a short flash
 
 
 <a id="alt-normal"></a>
