@@ -138,6 +138,7 @@ class Ui {
   bool grids_save_flag_;
   bool deja_vu_lock_;
   uint32_t explicit_reset_flash_time_;
+  uint32_t x_mode_flash_time_;
   
   bool output_test_mode_;
   uint16_t output_test_forced_dac_code_[4];

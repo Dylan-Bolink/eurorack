@@ -104,6 +104,7 @@ void Ui::Init(
   grids_save_flag_ = false;
   output_test_mode_ = false;
   explicit_reset_flash_time_ = 0;
+  x_mode_flash_time_ = 0;
   
   if (switches_.pressed_immediate(SWITCH_X_MODE)) {
     if (state->color_blind == 1) {
@@ -349,6 +350,14 @@ void Ui::UpdateLEDs() {
           LedColor x_dv_color = LED_COLOR_OFF;
           if (state.deja_vu_x_cv_swap) x_dv_color = LED_COLOR_GREEN;
           leds_.set(LED_X_DEJA_VU, x_dv_color);
+
+          //Flash X led if bank change
+          if (x_mode_flash_time_) {
+            if (system_clock.milliseconds() - x_mode_flash_time_ < 2000)
+              leds_.set(LED_X_CONTROL_MODE, MakeColor(state.x_control_mode, cb));
+            else
+              x_mode_flash_time_ = 0;
+          }
 
         } else {
           leds_.set(LED_T_RANGE, MakeColor(state.t_range, cb));
@@ -703,10 +712,13 @@ void Ui::OnSwitchReleased(const Event& e) {
             state->x_control_mode = (state->x_control_mode + 1) % 3;
           }
         }
+        if (is_long && state->t_model >= T_GENERATOR_MODEL_GRIDS) {
+          x_mode_flash_time_ = system_clock.milliseconds() | 1;
+        }
         SaveState();
       }
       break;
-      
+
     case SWITCH_X_EXT:
       if (mode_ == UI_MODE_RECORD_SCALE) {
         int scale_index = settings_->state().x_scale;
