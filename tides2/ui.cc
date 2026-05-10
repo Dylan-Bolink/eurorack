@@ -148,13 +148,11 @@ void Ui::UpdateLEDs() {
           LedColor output_color = MakeColor((s.output_mode + 3) % 4, color_blind);
           if (output_color == LED_COLOR_OFF) {
             // No led cycle through colors
-            uint32_t phase = system_clock.milliseconds() % 256;
-            if (phase < 64) {
-              const LedColor cycle[] = { LED_COLOR_GREEN, LED_COLOR_YELLOW, LED_COLOR_RED };
-              leds_.set(LED_SHIFT, cycle[(phase * 3) >> 6]);
-            } else {
-              leds_.set(LED_SHIFT, LED_COLOR_OFF);
-            }
+            uint32_t slot = (system_clock.milliseconds() / 128) % 4;
+            LedColor color = LED_COLOR_OFF;
+            if (slot == 0) color = LED_COLOR_GREEN;
+            else if (slot == 2) color = LED_COLOR_RED;
+            leds_.set(LED_SHIFT, color);
           } else {
             bool alt_blink = system_clock.milliseconds() & 128;
             leds_.set(LED_SHIFT, alt_blink ? output_color : LED_COLOR_OFF);
