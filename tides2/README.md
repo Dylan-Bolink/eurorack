@@ -39,7 +39,9 @@ Long-press **Range** again to unlock.
 | **Orange** | Fifths and octaves | +- 2 octaves |
 | **Red** | Octaves | +- 4 octaves |
 
-> Patching a cable into **Clock** exits frequency lock since you enter [**clocked speed**](https://arc.net/l/quote/tgzhboie) from the original firmware.
+> Patching a cable into **Clock** exits frequency lock since you enter [**clocked speed**](https://arc.net/l/quote/tgzhboie) from the original firmware. Unpatching will get you back to the locked state.
+
+> Frequency lock is only stored when you change **Output mode** or **Ramp mode** . This is because you would otherwise hear a disruption in your sound.
 
 <br>
 

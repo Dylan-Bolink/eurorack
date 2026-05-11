@@ -138,7 +138,7 @@ void Ui::UpdateLEDs() {
         bool color_blind = s.color_blind == 1;
         
         leds_.set(LED_MODE, MakeColor(s.mode, color_blind));
-        if (cv_reader_->frequency_locked()) {
+        if (cv_reader_->lock_active()) {
           bool fast_blink = system_clock.milliseconds() & 128;
           leds_.set(LED_RANGE, fast_blink ? MakeColor(cv_reader_->lock_mode(), color_blind) : LED_COLOR_OFF);
         } else {
@@ -195,7 +195,10 @@ void Ui::OnSwitchReleased(const Event& e) {
       factory_test_->Calibrate(0, 1.0f, 3.0f);
       ignore_release_[SWITCH_RANGE] = ignore_release_[SWITCH_SHIFT] = true;
     } else if (e.control_id == SWITCH_RANGE) {
-      cv_reader_->SetFrequencyLocked(!cv_reader_->frequency_locked());
+      // Lock controls are inert while a clock is patched (clocked mode wins).
+      if (!cv_reader_->clock_patched()) {
+        cv_reader_->SetFrequencyLocked(!cv_reader_->frequency_locked());
+      }
     } else if (e.control_id == SWITCH_SHIFT) {
       State* s = settings_->mutable_state();
       s->alt_mode = s->alt_mode ? 0 : 1;
@@ -209,7 +212,7 @@ void Ui::OnSwitchReleased(const Event& e) {
   } else {
     // When locked, range button cycles transpose mode instead of frequency range.
     // No SaveState() here — transpose mode is synced on the next regular save.
-    if (cv_reader_->frequency_locked() && e.control_id == SWITCH_RANGE) {
+    if (cv_reader_->lock_active() && e.control_id == SWITCH_RANGE) {
       cv_reader_->SetLockMode((cv_reader_->lock_mode() + 1) % 3);
       return;
     }

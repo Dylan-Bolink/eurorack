@@ -52,6 +52,7 @@ void CvReader::Init(Settings* settings) {
 
   const State& s = settings_->state();
   frequency_locked_       = s.frequency_locked != 0;
+  clock_patched_          = false;
   lock_mode_              = s.get_lock_mode() % 3;
   float stored_pot        = s.get_locked_frequency();
   locked_note_semitones_  = CenterDetent(stored_pot) * 96.0f - 48.0f;
@@ -81,11 +82,9 @@ void CvReader::Read(IOBuffer::Block* block) {
   // Note.
   float raw_pot = pots_adc_.float_value(POTS_ADC_CHANNEL_POT_FREQUENCY);
   previous_pot_value_ = raw_pot;
+  clock_patched_ = block->input_patched[1];
 
   float note;
-  if (frequency_locked_ && block->input_patched[1]) {
-    frequency_locked_ = false;
-  }
   if (frequency_locked_ && !block->input_patched[1]) {
     float delta = raw_pot - lock_reference_pot_;
     if (fabsf(delta) < 0.05f) delta = 0.0f;  // deadband: snap to locked pitch within ±5%

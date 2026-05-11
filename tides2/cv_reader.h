@@ -58,6 +58,8 @@ class CvReader {
   void    SetFrequencyLocked(bool locked);
   void    SetLockMode(uint8_t mode);
   bool    frequency_locked()   const { return frequency_locked_; }
+  bool    clock_patched()      const { return clock_patched_; }
+  bool    lock_active()        const { return frequency_locked_ && !clock_patched_; }
   float   lock_reference_pot() const { return lock_reference_pot_; }
   uint8_t lock_mode()          const { return lock_mode_; }
   
@@ -80,6 +82,7 @@ class CvReader {
   float note_lp_;
   float alt_note_lp_;
   bool  frequency_locked_;
+  bool  clock_patched_;             // last observed CLOCK gate patched state
   float locked_note_semitones_;     // locked pitch in semitones (post-CenterDetent, exact)
   float lock_reference_pot_;        // raw pot position at lock time (for delta calc)
   float previous_pot_value_;
