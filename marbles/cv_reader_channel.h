@@ -179,6 +179,7 @@ class CvReaderChannel {
     return stored_pot_value_ * pot_scale_ + pot_offset_;
   }
   inline float unscaled_pot() const { return pot_value_; }
+  inline float unscaled_stored_pot() const { return stored_pot_value_; }
 
   inline void LockPot() {
     pot_state_ = POT_STATE_LOCKED;
@@ -189,6 +190,12 @@ class CvReaderChannel {
       previous_pot_value_ = pot_value_;
       pot_state_ = POT_STATE_CATCHING_UP;
     }
+  }
+
+  inline void CatchUpFrom(float value) {
+    stored_pot_value_ = value;
+    previous_pot_value_ = pot_value_;
+    pot_state_ = POT_STATE_CATCHING_UP;
   }
 
  private:

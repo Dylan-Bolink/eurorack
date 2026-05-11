@@ -1,6 +1,6 @@
 # Mutable Instruments - Marbles: Truchets
 
-A reimagining of Mutable Instruments [**_Grids_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/grids/) drum pattern generator, now living inside Marbles. Truchets is built on [**_Marbles 1.3_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/marbles/firmware/), it adds a new T-side mode while keeping all original Marbles functionality intact.
+A reimagining of Mutable Instruments [**_Grids_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/grids/) drum pattern generator, now living inside Marbles. Truchets is built on [**_Marbles 1.3_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/marbles/firmware/), it adds a new T-side mode and new X-side features while keeping all original Marbles functionality intact.
 
 <br>
 
@@ -11,12 +11,17 @@ When you need instructions on how to update your marbles go to the [**original m
 
 ## Contents
 
-1. [Activating Grids Mode](#activating-grids-mode)
-2. [Outputs](#outputs)
-3. [Standard Controls](#standard-controls)
+1. [Button Behavior](#button-behavior)
+2. [Marbles Enhancements](#marbles-enhancements)
+   - [X Modes](#x-modes)
+   - [X Ext Modes](#x-ext-modes)
+   - [Explicit Reset](#explicit-reset)
+3. [Activating Grids Mode](#activating-grids-mode)
+4. [Outputs](#outputs)
+5. [Standard Controls](#standard-controls)
    - [Density Knobs](#density-knobs)
    - [Deja Vu (T Side)](#deja-vu-t-side)
-4. [X Shift Layer - Knobs](#x-shift-layer---knobs)
+6. [X Shift Layer - Knobs](#x-shift-layer---knobs)
    - [Groove Offset](#groove-offset-x-bias)
    - [Rate](#rate-rate)
    - [Swing](#swing-jitter)
@@ -24,13 +29,105 @@ When you need instructions on how to update your marbles go to the [**original m
    - [Chaos](#chaos-spread)
    - [Accent Control](#accent-control-deja-vu)
    - [Accent Variation](#accent-variation-length)
-5. [X Shift Layer - Buttons](#x-shift-layer---buttons)
+7. [X Shift Layer - Buttons](#x-shift-layer---buttons)
    - [Pattern Banks](#pattern-banks)
    - [CV Swap Routing](#cv-swap-routing)
    - [Deja Vu CV Swap](#deja-vu-cv-swap)
-6. [Advanced Settings Layer](#advanced-settings-layer)
-7. [Patching Ideas](#patching-ideas)
-8. [Credits](#credits)
+8. [Advanced Settings Layer](#advanced-settings-layer)
+9. [Patching Ideas](#patching-ideas)
+10. [Credits](#credits)
+
+<br>
+
+## Button Behavior
+
+**T Mode** and **X Mode** buttons use tap and long-press to navigate between modes:
+
+| Press Duration | Behavior |
+|----------------|----------|
+| **Short tap** (< 275ms) | Cycle within current bank |
+| **Medium press** (275ms–2s) | Ignored (prevents accidental changes) |
+| **Long press** (≥ 2s) | Switch between banks (no blink/blink) |
+
+<br>
+
+## Marbles Enhancements
+
+These features extend the standard Marbles functionality and are available outside of Grids mode.
+
+### X Modes
+
+The **X Mode** button now has 5 modes split into two banks:
+
+| Bank  | LED State | Name |
+|------|-----------|------|
+| Basic | Solid Green | Identical |
+| Basic | Solid Orange | Bump |
+| Basic | Solid Red | Tilt |
+| Alternative | Blinking Green | Round Robin |
+| Alternative | Blinking Orange | Envelope |
+
+> Short tap cycles within the current bank. Long press switches between banks.
+
+<br>
+
+### Round Robin (Blinking green)
+
+Cycles through X1/X2/X3 outputs one at a time. Each clock pulse advances to the next channel. When clock is not patched the clocking signal comes from T2.
+
+> In normal green mode, all three X outputs share the same random sequence in a shift-register style — X1 gets the newest value, X2 gets the previous, and X3 the one before that. In round robin, only one output updates per clock tick while the other two hold their last value, cycling X1 → X2 → X3.
+
+<br>
+
+### Envelope (Blinking orange)
+
+Generates attack-decay envelopes on X outputs triggered by t1t2t3 or clock input.
+
+| Control | Function |
+|---------|----------|
+| **Spread** | Random envelope time distribution |
+| **Bias** | Envelope length |
+| **Steps** | Attack/decay ratio |
+
+
+**X Range** changes retrigger behavior:
+
+| LED State | Retrigger Mode |
+|-----------|----------------|
+| Green (narrow) | Hard reset on every trigger |
+| Orange (positive) | Only retrigger after attack phase (Serge-style) |
+| Red (full) | Only retrigger after envelope completes (legato) |
+
+> With external clock, envelopes trigger round-robin style (one channel per trigger). With internal clock, all channels trigger independently.
+
+<br>
+
+### X Ext Modes
+
+**X Ext** cycles through 3 modes:
+
+| LED State | Mode | Function |
+|-----------|------|----------|
+| Off | Normal | Standard behavior |
+| Solid Green | External | Original external input behavior |
+| Blinking Green | Transpose | Spread CV input becomes V/Oct transposition |
+
+> In **Transpose** mode, the Spread CV input applies a pitch offset to all three X outputs. The input uses a V/Oct correction curve for tracking accuracy. While the hardware is not made for it this curve tries to fix that.
+
+<br>
+
+### Explicit Reset
+
+Press **T Mode** + **X Mode** to cycle through 4 states:
+
+| State  | T Section Reset | X Section Reset |
+|-------|-----------------|-----------------|
+| Off | Disabled | Disabled |
+| 1 | Enabled (T Jitter input) | Disabled |
+| 2 | Disabled | Enabled (X Steps input) |
+| 3 | Enabled | Enabled |
+
+> After toggling, **T Deja Vu** and **X Deja Vu** LEDs flash for 1 second to indicate which sections are active.
 
 <br>
 
@@ -40,7 +137,7 @@ Long press **T Mode** while on drum mode (solid red) to enter Grids mode (blinki
 
 > To exit, long press **T Mode** without changing anything in the advanced layer.
 
-## Outputs
+## Grids mode outputs
 
 | Output | Function |
 |--------|----------|
@@ -176,7 +273,7 @@ Change the pattern coordinates on the current bank.
 
 ### Pattern Banks
 
-Hold **X Mode** + tap **T Model** to cycle through pattern banks:
+Hold **X Mode** + tap **T Mode** to cycle through pattern banks:
 
 | LED State | Bank |
 |-----------|------|
@@ -220,19 +317,26 @@ Hold **X Mode** + tap **T Model** to cycle through pattern banks:
 
 ## Advanced Settings Layer
 
-**Hold T Model** and press buttons to toggle advanced settings.
+**Hold T Mode** and press buttons to toggle advanced settings.
 
 <img src="images/truchets_cheatsheet_4.png" style="width:500px;">
 
-| Hold T Model + Press | Setting | Off (default) | On (LED lit) |
+| Hold T Mode + Press | Setting | Off (default) | On (LED lit) |
 |----------------------|---------|---------------|--------------|
-| **T Range** | Read mode | Normal | Henri |
-| **X Ext** | Accent hang | Normal gates | Hanging accents |
 | **T Deja Vu** | Loop playhead | Shared playhead | Independent playhead |
 | **X Deja Vu** | Loop start | Dynamic (from current step) | Always from beat 1 |
-| **X Mode** | Explicit reset | Off | On |
+| **T Range** | Read mode | Normal | Henri |
+| **X Ext** | Accent hang | Normal gates | Hanging accents |
+| **X Range** | Knob swap | Normal knob locations | Knobs swapped |
+| **X Mode** | Explicit reset | Off | 4 states (see [Explicit Reset](#explicit-reset)) |
 
 ### Setting Descriptions
+
+#### Independent Loop Playhead (T Deja Vu)
+When **on**, the loop has its own playhead separate from the main pattern. When you unlock, playback stays in sync with where the pattern would have been.
+
+#### Loop from Beat 1 (X Deja Vu)
+When **on**, loops always start from step 1 of the pattern instead of the step where you activated the loop.
 
 #### Henri Mode (T Range)
 Switches pattern reading between Normal (original Grids algorithm) and Henri (alternate reading from Grids4Live Max plugin). Henri mode produces different rhythmic relationships between kick, snare, and hi-hat.
@@ -242,19 +346,18 @@ When **on** AND an accent variation is active, accents will sustain until the ne
 
 > This turns accent into a sample and hold output driven by accent and the current accent variation.
 
-#### Independent Loop Playhead (T Deja Vu)
-When **on**, the loop has its own playhead separate from the main pattern. When you unlock, playback stays in sync with where the pattern would have been.
+#### Knob Swap (X Range)
+When **on**, the Marbles knobs (**Steps**, **Bias**, **Spread**) directly control Grids coordinates (**Map X**, **Map Y**, **Chaos**). Marbles X parameters use stored alternate values. When **off** (default), Marbles knobs control Marbles X parameters and Grids coordinates comes from the shift layer.
 
-#### Loop from Beat 1 (X Deja Vu)
-When **on**, loops always start from step 1 of the pattern instead of the step where you activated the loop.
+> When toggling, current knob positions are captured to prevent parameter jumps.
+
+> Knob swap is independent of CV swap. CV swap routes CV inputs to Grids coordinates, while knob swap changes which parameters the physical knobs control. Both can be used at the same time.
 
 #### Explicit Reset (X Mode)
-Original Marbles 1.3 setting. When enabled, reset input resets the pattern to step 1 or to the first step of the loop window when looped.
-
-> [1.3 manual](https://pichenettes.github.io/mutable-instruments-documentation/modules/marbles/firmware/#:~:text=Implicit%20and%20explicit,experience%20odd%20timing.)
+Now supports 4 independent states for T and X sections. See [Explicit Reset](#explicit-reset) for full details.
 
 #### Gate length control (t Bias & Jitter)
-While **Holding T Model** the gate configuration parameters are still accessible. 
+While **Holding T Mode** the gate configuration parameters are still accessible. 
 > [Marbles manual about gate configuration](https://arc.net/l/quote/heojrdjx)
 
 
@@ -268,6 +371,7 @@ While **Holding T Model** the gate configuration parameters are still accessible
 - Self patching Marbles X side to any grid parameter can give great results. 
 - Having a high spread and steps on the X side can give random gate outputs driven by the Grids gate generation. Essentially creating 7 gate outputs.
 - Having a offset module patched to Map/Chaos cv in can give you direct control over these parameters without using the shift layer. Think of Stages, Shades or Blinds
+- Transpose mode lets you transpose X outputs with a sequencer or keyboard CV patched to the Spread CV input. Or you can add a extra lfo on top of the randomness.
 
 <br>
 

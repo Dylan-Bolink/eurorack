@@ -318,7 +318,7 @@ void Process(IOBuffer::Block* block, size_t size) {
 
   // Disable if grids_y_cv_swap == 2 (jitter CV goes to map Y)
   bool t_reset_cv_available = !(grids_mode && settings.grids_y_cv_swap() == 2);
-  bool t_section_reset = settings.explicit_reset() && t_reset_cv_available &&
+  bool t_section_reset = (settings.explicit_reset() & 1) && t_reset_cv_available &&
       hidden_gates[ADC_CHANNEL_T_JITTER] & GATE_FLAG_RISING;
   
   t_generator.set_model(TGeneratorModel(state.t_model));
@@ -369,36 +369,69 @@ void Process(IOBuffer::Block* block, size_t size) {
 
     float rate_normalized = static_cast<float>(state.t_rate_stored) / 255.0f;
     t_generator.set_rate(rate_normalized * 120.0f - 60.0f);
-    float final_x = static_cast<float>(state.grids_x) / 255.0f;
-    float final_y = static_cast<float>(state.grids_y) / 255.0f;
-    float chaos_raw = static_cast<float>(state.grids_chaos) / 255.0f;
-    float final_chaos = (chaos_raw - 0.5f) * 2.0f;
+    float final_x, final_y, final_chaos;
+    if (state.grids_knob_swap) {
+      // Swapped: grids coords from pot only (CV stays with X params)
+      final_x = cv_reader.channel(ADC_CHANNEL_X_STEPS).unscaled_stored_pot();
+      final_y = cv_reader.channel(ADC_CHANNEL_X_BIAS).unscaled_stored_pot();
+      float chaos_pot = cv_reader.channel(ADC_CHANNEL_X_SPREAD).unscaled_stored_pot();
+      final_chaos = (chaos_pot - 0.5f) * 2.0f;
 
-    // Map X CV: 0=off, 1=steps, 2=t_bias
-    if (settings.grids_x_cv_swap() == 1) {
+      // CV swap still routes CV to grids coords when explicitly enabled
+      if (settings.grids_x_cv_swap() == 1) {
         final_x += cv_reader.channel(ADC_CHANNEL_X_STEPS).cv();
         CONSTRAIN(final_x, 0.0f, 1.0f);
-    } else if (settings.grids_x_cv_swap() == 2) {
+      } else if (settings.grids_x_cv_swap() == 2) {
         final_x += cv_reader.channel(ADC_CHANNEL_T_BIAS).cv();
         CONSTRAIN(final_x, 0.0f, 1.0f);
-    }
-
-    // Map Y CV: 0=off, 1=x_bias, 2=jitter
-    if (settings.grids_y_cv_swap() == 1) {
+      }
+      if (settings.grids_y_cv_swap() == 1) {
         final_y += cv_reader.channel(ADC_CHANNEL_X_BIAS).cv();
         CONSTRAIN(final_y, 0.0f, 1.0f);
-    } else if (settings.grids_y_cv_swap() == 2) {
+      } else if (settings.grids_y_cv_swap() == 2) {
         final_y += cv_reader.channel(ADC_CHANNEL_T_JITTER).cv();
         CONSTRAIN(final_y, 0.0f, 1.0f);
-    }
-
-    // Chaos CV: 0=off, 1=spread, 2=rate
-    if (settings.grids_chaos_cv_swap() == 1 && !state.x_register_mode) {
+      }
+      if (settings.grids_chaos_cv_swap() == 1 && state.x_register_mode == X_REGISTER_MODE_OFF) {
         final_chaos += cv_reader.channel(ADC_CHANNEL_X_SPREAD).cv();
         CONSTRAIN(final_chaos, -1.0f, 1.0f);
-    } else if (settings.grids_chaos_cv_swap() == 2) {
+      } else if (settings.grids_chaos_cv_swap() == 2) {
         final_chaos += cv_reader.channel(ADC_CHANNEL_T_RATE).cv() / 60.0f;
         CONSTRAIN(final_chaos, -1.0f, 1.0f);
+      }
+    } else {
+      // Normal: grids coords from stored alt fields
+      final_x = static_cast<float>(state.x_steps_alt) / 255.0f;
+      final_y = static_cast<float>(state.x_bias_alt) / 255.0f;
+      float chaos_raw = static_cast<float>(state.x_spread_alt) / 255.0f;
+      final_chaos = (chaos_raw - 0.5f) * 2.0f;
+
+      // Map X CV: 0=off, 1=steps, 2=t_bias
+      if (settings.grids_x_cv_swap() == 1) {
+        final_x += cv_reader.channel(ADC_CHANNEL_X_STEPS).cv();
+        CONSTRAIN(final_x, 0.0f, 1.0f);
+      } else if (settings.grids_x_cv_swap() == 2) {
+        final_x += cv_reader.channel(ADC_CHANNEL_T_BIAS).cv();
+        CONSTRAIN(final_x, 0.0f, 1.0f);
+      }
+
+      // Map Y CV: 0=off, 1=x_bias, 2=jitter
+      if (settings.grids_y_cv_swap() == 1) {
+        final_y += cv_reader.channel(ADC_CHANNEL_X_BIAS).cv();
+        CONSTRAIN(final_y, 0.0f, 1.0f);
+      } else if (settings.grids_y_cv_swap() == 2) {
+        final_y += cv_reader.channel(ADC_CHANNEL_T_JITTER).cv();
+        CONSTRAIN(final_y, 0.0f, 1.0f);
+      }
+
+      // Chaos CV: 0=off, 1=spread, 2=rate
+      if (settings.grids_chaos_cv_swap() == 1 && state.x_register_mode == X_REGISTER_MODE_OFF) {
+        final_chaos += cv_reader.channel(ADC_CHANNEL_X_SPREAD).cv();
+        CONSTRAIN(final_chaos, -1.0f, 1.0f);
+      } else if (settings.grids_chaos_cv_swap() == 2) {
+        final_chaos += cv_reader.channel(ADC_CHANNEL_T_RATE).cv() / 60.0f;
+        CONSTRAIN(final_chaos, -1.0f, 1.0f);
+      }
     }
     if (fabsf(final_chaos) < kDeadband) final_chaos = 0.0f;
 
@@ -465,6 +498,22 @@ void Process(IOBuffer::Block* block, size_t size) {
   float note_cv = 0.5f * (note_cv_1 + note_cv_2);
   float u = note_filter.Process(0.5f * (note_cv + 1.0f));
 
+  // V/Oct correction curve
+  if (state.x_register_mode == X_REGISTER_MODE_VOCT_OFFSET) {
+    static const float kVoctCorrectionTable[] = {
+      0.015f,  // u=0.000 -5.0V
+      0.136f,  // u=0.125 -3.75V
+      0.257f,  // u=0.250 -2.5V
+      0.378f,  // u=0.375 -1.25V
+      0.499f,  // u=0.500  0.0V
+      0.620f,  // u=0.625 +1.25V
+      0.741f,  // u=0.750 +2.5V
+      0.861f,  // u=0.875 +3.75V
+      0.982f,  // u=1.000 +5.0V
+    };
+    u = Interpolate(kVoctCorrectionTable, u, 8.0f);
+  }
+
   if (test_adc_noise) {
     static float note_lp = 0.0f;
     float note = note_cv_1;
@@ -491,28 +540,53 @@ void Process(IOBuffer::Block* block, size_t size) {
   } else {
     x.control_mode = ControlMode(state.x_control_mode);
     x.voltage_range = VoltageRange(state.x_range % 3);
-    x.register_mode = state.x_register_mode;
+    bool is_register = (state.x_register_mode == X_REGISTER_MODE_REGISTER);
+    bool is_voct_offset = (state.x_register_mode == X_REGISTER_MODE_VOCT_OFFSET);
+    x.register_mode = is_register;
+    x.use_shift_register = is_register || is_voct_offset;
     x.register_value = u;
     cv_reader.set_attenuverter(
-        ADC_CHANNEL_X_SPREAD, state.x_register_mode ? 0.5f : 1.0f);
+        ADC_CHANNEL_X_SPREAD, (is_register || is_voct_offset) ? 0.5f : 1.0f);
 
-    // Check if CV is swapped to grids - if so, use pot only
-    if (grids_mode && settings.grids_chaos_cv_swap() == 1) {
+    if (grids_mode && state.grids_knob_swap) {
+      // Swapped: X params from stored alt fields + CV from jacks
+      // CV goes to its normal destination (X params) unless rerouted by CV swap
+      x.spread = static_cast<float>(state.x_spread_alt) / 255.0f;
+      if (!is_voct_offset && settings.grids_chaos_cv_swap() != 1) {
+        x.spread += cv_reader.channel(ADC_CHANNEL_X_SPREAD).cv();
+        CONSTRAIN(x.spread, 0.0f, 1.0f);
+      }
+
+      x.bias = static_cast<float>(state.x_bias_alt) / 255.0f;
+      if (settings.grids_y_cv_swap() != 1) {
+        x.bias += cv_reader.channel(ADC_CHANNEL_X_BIAS).cv();
+        CONSTRAIN(x.bias, 0.0f, 1.0f);
+      }
+
+      x.steps = static_cast<float>(state.x_steps_alt) / 255.0f;
+      if (settings.grids_x_cv_swap() != 1) {
+        x.steps += cv_reader.channel(ADC_CHANNEL_X_STEPS).cv();
+        CONSTRAIN(x.steps, 0.0f, 1.0f);
+      }
+    } else {
+      // Normal: X params from ADC (with CV swap isolation)
+      if (is_voct_offset || (grids_mode && settings.grids_chaos_cv_swap() == 1)) {
         x.spread = cv_reader.channel(ADC_CHANNEL_X_SPREAD).unscaled_pot();
-    } else {
+      } else {
         x.spread = parameters[ADC_CHANNEL_X_SPREAD];
-    }
+      }
 
-    if (grids_mode && settings.grids_y_cv_swap() == 1) {
+      if (grids_mode && settings.grids_y_cv_swap() == 1) {
         x.bias = cv_reader.channel(ADC_CHANNEL_X_BIAS).unscaled_pot();
-    } else {
+      } else {
         x.bias = parameters[ADC_CHANNEL_X_BIAS];
-    }
+      }
 
-    if (grids_mode && settings.grids_x_cv_swap() == 1) {
+      if (grids_mode && settings.grids_x_cv_swap() == 1) {
         x.steps = cv_reader.channel(ADC_CHANNEL_X_STEPS).unscaled_pot();
-    } else {
+      } else {
         x.steps = parameters[ADC_CHANNEL_X_STEPS];
+      }
     }
 
     x.deja_vu = x_deja_vu_state == DEJA_VU_LOCKED
@@ -526,6 +600,7 @@ void Process(IOBuffer::Block* block, size_t size) {
     y.control_mode = CONTROL_MODE_IDENTICAL;
     y.voltage_range = VoltageRange(state.y_range);
     y.register_mode = false;
+    y.use_shift_register = false;
     y.register_value = 0.0f;
     y.spread = float(state.y_spread) / 256.0f;
     y.bias = float(state.y_bias) / 256.0f;
@@ -537,16 +612,18 @@ void Process(IOBuffer::Block* block, size_t size) {
     
     if (settings.dirty_scale_index() != -1) {
       int i = settings.dirty_scale_index();
-      xy_generator.LoadScale(i, settings.persistent_data().scale[i]);
+      if (i < kNumScales) {
+        xy_generator.LoadScale(i, settings.persistent_data().scale[i]);
+      }
       settings.set_dirty_scale_index(-1);
     }
     
     y.scale_index = x.scale_index = state.x_scale;
     
     bool x_reset_cv_available = !(grids_mode && settings.grids_x_cv_swap() == 1);
-    bool x_section_reset = settings.explicit_reset() && x_reset_cv_available &&
+    bool x_section_reset = (settings.explicit_reset() & 2) && x_reset_cv_available &&
       hidden_gates[ADC_CHANNEL_X_STEPS] & GATE_FLAG_RISING;
-    if (xy_clock_source != CLOCK_SOURCE_EXTERNAL) {
+    if (xy_clock_source != CLOCK_SOURCE_EXTERNAL && (settings.explicit_reset() & 2)) {
       x_section_reset |= t_section_reset;
     }
 
@@ -563,16 +640,22 @@ void Process(IOBuffer::Block* block, size_t size) {
   
   const float* v = voltages;
   const bool* g = gates;
-  
+
+  float voct_offset = 0.0f;
+  if (state.x_register_mode == X_REGISTER_MODE_VOCT_OFFSET
+      && !test_adc_noise && !ui.recording_scale()) {
+    voct_offset = (u - 0.5f) * 10.0f;
+  }
+
   for (size_t i = 0; i < size; ++i) {
-    float val_x1 = *v++; 
+    float val_x1 = *v++;
     float val_x2 = *v++;
-    float val_x3 = *v++; 
+    float val_x3 = *v++;
     float val_y  = *v++;
 
-    block->cv_output[1][i] = DacCode(1, val_x1); // X1
-    block->cv_output[2][i] = DacCode(2, val_x2); // X2
-    block->cv_output[3][i] = DacCode(3, val_x3); // X3
+    block->cv_output[1][i] = DacCode(1, val_x1 + voct_offset); // X1
+    block->cv_output[2][i] = DacCode(2, val_x2 + voct_offset); // X2
+    block->cv_output[3][i] = DacCode(3, val_x3 + voct_offset); // X3
     
     if (grids_mode) {
       float accent_voltage = 0.0f;

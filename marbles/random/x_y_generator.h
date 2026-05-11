@@ -54,9 +54,11 @@ enum ClockSource {
 };
 
 enum ControlMode {
-  CONTROL_MODE_IDENTICAL,
-  CONTROL_MODE_BUMP,
-  CONTROL_MODE_TILT
+  CONTROL_MODE_IDENTICAL,     // 0 - solid green
+  CONTROL_MODE_BUMP,          // 1 - solid yellow
+  CONTROL_MODE_TILT,          // 2 - solid red
+  CONTROL_MODE_ROUND_ROBIN,   // 3 - blinking green
+  CONTROL_MODE_ENVELOPE       // 4 - blinking yellow
 };
 
 enum OutputGroup {
@@ -73,6 +75,7 @@ struct GroupSettings {
   ControlMode control_mode;
   VoltageRange voltage_range;
   bool register_mode;
+  bool use_shift_register;
   float register_value;
   float spread;
   float bias;
@@ -137,7 +140,15 @@ class XYGenerator {
   int external_clock_stabilization_counter_;
   
   bool use_shifted_sequences_[kNumChannels];
-  
+
+  int rr_counter_;
+  float rr_prev_phase_;
+  float rr_held_[kNumXChannels];
+
+  float env_phase_[kNumXChannels];
+  float env_rate_[kNumXChannels];
+  float env_prev_ramp_[kNumXChannels];
+
   DISALLOW_COPY_AND_ASSIGN(XYGenerator);
 };
 

@@ -103,6 +103,8 @@ void Ui::Init(
   setting_modification_flag_ = false;
   grids_save_flag_ = false;
   output_test_mode_ = false;
+  explicit_reset_flash_time_ = 0;
+  x_mode_flash_time_ = 0;
   
   if (switches_.pressed_immediate(SWITCH_X_MODE)) {
     if (state->color_blind == 1) {
@@ -147,9 +149,9 @@ void Ui::Poll() {
 
   if (s->t_model == marbles::T_GENERATOR_MODEL_GRIDS) {
     // GRIDS MODE: Remap Shift-Knobs to Grids Variables
-    alternate_knob_mappings_[ADC_CHANNEL_X_STEPS].destination = &s->grids_x;
-    alternate_knob_mappings_[ADC_CHANNEL_X_BIAS].destination  = &s->grids_y;
-    alternate_knob_mappings_[ADC_CHANNEL_X_SPREAD].destination = &s->grids_chaos;
+    alternate_knob_mappings_[ADC_CHANNEL_X_STEPS].destination = &s->x_steps_alt;
+    alternate_knob_mappings_[ADC_CHANNEL_X_BIAS].destination  = &s->x_bias_alt;
+    alternate_knob_mappings_[ADC_CHANNEL_X_SPREAD].destination = &s->x_spread_alt;
     alternate_knob_mappings_[ADC_CHANNEL_T_RATE].destination   = &s->t_rate_stored;
     alternate_knob_mappings_[ADC_CHANNEL_DEJA_VU_AMOUNT].destination = &s->grids_accent_threshold;
     alternate_knob_mappings_[ADC_CHANNEL_DEJA_VU_LENGTH].destination = &s->grids_accent_variation;
@@ -178,12 +180,8 @@ void Ui::Poll() {
     if (switches_.pressed(Switch(i)) && !ignore_release_[i]) {
       int32_t pressed_time = system_clock.milliseconds() - press_time_[i];
       if (pressed_time > kLongPressDuration && !setting_modification_flag_) {
-        bool suppress = (i == SWITCH_T_MODEL &&
-            settings_->state().t_model >= T_GENERATOR_MODEL_GRIDS);
-        if (!suppress) {
-          queue_.AddEvent(CONTROL_SWITCH, i, pressed_time);
-          ignore_release_[i] = true;
-        }
+        queue_.AddEvent(CONTROL_SWITCH, i, pressed_time);
+        ignore_release_[i] = true;
       }
     }
     if (switches_.released(Switch(i)) && !ignore_release_[i]) {
@@ -304,7 +302,13 @@ void Ui::UpdateLEDs() {
           leds_.set(LED_T_DEJA_VU, state.grids_sync_playheads ? LED_COLOR_GREEN : LED_COLOR_OFF);
           leds_.set(LED_X_DEJA_VU, state.grids_loop_start_at_one ? LED_COLOR_GREEN : LED_COLOR_OFF);
 
-          leds_.set(LED_X_CONTROL_MODE, state.explicit_reset ? LED_COLOR_YELLOW : LED_COLOR_OFF);
+          {
+            static const LedColor er_colors[] = {
+                LED_COLOR_OFF, LED_COLOR_GREEN, LED_COLOR_YELLOW, LED_COLOR_RED
+            };
+            leds_.set(LED_X_CONTROL_MODE, er_colors[state.explicit_reset]);
+          }
+          leds_.set(LED_X_RANGE, state.grids_knob_swap ? LED_COLOR_GREEN : LED_COLOR_OFF);
         } else if (settings_->state().t_model == T_GENERATOR_MODEL_GRIDS &&
             switches_.pressed(SWITCH_X_MODE) && grids_held_first == SWITCH_X_MODE) {
 
@@ -347,15 +351,34 @@ void Ui::UpdateLEDs() {
           if (state.deja_vu_x_cv_swap) x_dv_color = LED_COLOR_GREEN;
           leds_.set(LED_X_DEJA_VU, x_dv_color);
 
+          //Flash X led if bank change
+          if (x_mode_flash_time_) {
+            if (system_clock.milliseconds() - x_mode_flash_time_ < 2000)
+              leds_.set(LED_X_CONTROL_MODE, MakeColor(state.x_control_mode, cb));
+            else
+              x_mode_flash_time_ = 0;
+          }
+
         } else {
           leds_.set(LED_T_RANGE, MakeColor(state.t_range, cb));
           if (mode_ == UI_MODE_NORMAL) {
-            leds_.set(LED_X_RANGE,
-                      state.x_register_mode
-                          ? LED_COLOR_OFF
-                          : MakeColor(state.x_range, cb));
-            leds_.set(LED_X_EXT,
-                      state.x_register_mode ? LED_COLOR_GREEN : LED_COLOR_OFF);
+            if (state.x_control_mode == 4) {  // CONTROL_MODE_ENVELOPE
+              leds_.set(LED_X_RANGE, MakeColor(state.x_range, cb));
+            } else {
+              leds_.set(LED_X_RANGE,
+                        state.x_register_mode == X_REGISTER_MODE_REGISTER
+                            ? LED_COLOR_OFF
+                            : MakeColor(state.x_range, cb));
+            }
+            {
+              LedColor x_ext_color = LED_COLOR_OFF;
+              if (state.x_register_mode == X_REGISTER_MODE_REGISTER) {
+                x_ext_color = LED_COLOR_GREEN;
+              } else if (state.x_register_mode == X_REGISTER_MODE_VOCT_OFFSET) {
+                x_ext_color = slow_blink ? LED_COLOR_GREEN : LED_COLOR_OFF;
+              }
+              leds_.set(LED_X_EXT, x_ext_color);
+            }
           } else {
             leds_.set(LED_X_RANGE, scale_color);
             leds_.set(LED_X_EXT, LED_COLOR_GREEN);
@@ -425,14 +448,25 @@ void Ui::UpdateLEDs() {
       leds_.set(LED_X_RANGE, blink ? LED_COLOR_RED : LED_COLOR_OFF);
       break;
       
-    case UI_MODE_DISPLAY_RESET_MODE:
-      {
-        const bool l = blink && state.explicit_reset;
-        leds_.set(LED_T_MODEL, l ? LED_COLOR_YELLOW : LED_COLOR_OFF);
-        leds_.set(LED_X_CONTROL_MODE, l ? LED_COLOR_YELLOW : LED_COLOR_OFF);
-      }
-      break;
   }
+
+  // Explicit reset animation which side.
+  if (mode_ == UI_MODE_NORMAL && explicit_reset_flash_time_ != 0) {
+    uint32_t elapsed = system_clock.milliseconds() - explicit_reset_flash_time_;
+    if (elapsed < 1000) {
+      uint8_t er = settings_->state().explicit_reset;
+      leds_.set(LED_T_DEJA_VU, (er & 1) && fast_blink ? LED_COLOR_GREEN : LED_COLOR_OFF);
+      leds_.set(LED_X_DEJA_VU, (er & 2) && fast_blink ? LED_COLOR_GREEN : LED_COLOR_OFF);
+
+      if (state.t_model != T_GENERATOR_MODEL_GRIDS) {
+        leds_.set(LED_T_MODEL, fast_blink ? LED_COLOR_YELLOW : LED_COLOR_OFF);
+        leds_.set(LED_X_CONTROL_MODE, fast_blink ? LED_COLOR_YELLOW : LED_COLOR_OFF);
+      }
+    } else {
+      explicit_reset_flash_time_ = 0;
+    }
+  }
+
   leds_.Write();
 }
 
@@ -520,14 +554,15 @@ void Ui::OnSwitchReleased(const Event& e) {
     }
   }
 
-  // X pressed while T held > Toggle explicit reset
+  // cycle explicit reset.
   if (e.control_id == SWITCH_X_MODE && switches_.pressed(SWITCH_T_MODEL)) {
     bool is_grids = state->t_model >= T_GENERATOR_MODEL_GRIDS;
     if (!is_grids || grids_held_first == SWITCH_T_MODEL) {
       ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_MODE] = true;
-      state->explicit_reset = !state->explicit_reset;
+      state->explicit_reset = (state->explicit_reset + 1) % 4;
+      uint32_t ms = system_clock.milliseconds();
+      explicit_reset_flash_time_ = (ms == 0) ? 1 : ms;
       if (!is_grids) {
-        mode_ = UI_MODE_DISPLAY_RESET_MODE;
         SaveState();
       } else {
         grids_save_flag_ = true;
@@ -564,7 +599,33 @@ void Ui::OnSwitchReleased(const Event& e) {
     }
     if (e.control_id == SWITCH_X_MODE) {
       ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_MODE] = true;
-      state->explicit_reset = !state->explicit_reset;
+      state->explicit_reset = (state->explicit_reset + 1) % 4;
+      uint32_t ms = system_clock.milliseconds();
+      explicit_reset_flash_time_ = (ms == 0) ? 1 : ms;
+      grids_save_flag_ = true;
+      return;
+    }
+    if (e.control_id == SWITCH_X_RANGE) {
+      ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_RANGE] = true;
+      // Save old alt values — these are what the "about to go live" side
+      // was using, and we need them for catch-up to prevent parameter jumps.
+      float old_steps = static_cast<float>(state->x_steps_alt) / 255.0f;
+      float old_bias = static_cast<float>(state->x_bias_alt) / 255.0f;
+      float old_spread = static_cast<float>(state->x_spread_alt) / 255.0f;
+      // Capture current knob positions into alt fields before swapping
+      // (the fields switch meaning, so initialize with current ADC values)
+      state->x_steps_alt = static_cast<uint8_t>(
+          cv_reader_->channel(ADC_CHANNEL_X_STEPS).unscaled_stored_pot() * 255.0f);
+      state->x_bias_alt = static_cast<uint8_t>(
+          cv_reader_->channel(ADC_CHANNEL_X_BIAS).unscaled_stored_pot() * 255.0f);
+      state->x_spread_alt = static_cast<uint8_t>(
+          cv_reader_->channel(ADC_CHANNEL_X_SPREAD).unscaled_stored_pot() * 255.0f);
+      state->grids_knob_swap = !state->grids_knob_swap;
+      // Start catch-up from old alt values so the side that just switched
+      // to live pot reading doesn't jump to the physical knob position.
+      cv_reader_->mutable_channel(ADC_CHANNEL_X_STEPS)->CatchUpFrom(old_steps);
+      cv_reader_->mutable_channel(ADC_CHANNEL_X_BIAS)->CatchUpFrom(old_bias);
+      cv_reader_->mutable_channel(ADC_CHANNEL_X_SPREAD)->CatchUpFrom(old_spread);
       grids_save_flag_ = true;
       return;
     }
@@ -601,14 +662,18 @@ void Ui::OnSwitchReleased(const Event& e) {
     
     case SWITCH_T_MODEL:
       {
+        bool is_long = e.data >= kLongPressDuration;
+        bool is_tap = e.data < 275;
+        if (!is_long && !is_tap) break;
         uint8_t bank = state->t_model / 3;
         if (bank) {
-          // In Grids mode: only long press (>=2s) exits
-          if (e.data >= kLongPressDuration) {
+          if (is_long) {
             state->t_model -= 3;
+          } else {
+            state->t_model = 3 + (state->t_model - 3 + 1) % 3;
           }
         } else {
-          if (e.data >= kMediumPressDuration) {
+          if (is_long) {
             state->t_model += 3;
           } else {
             state->t_model = (state->t_model + 1) % 3;
@@ -630,13 +695,30 @@ void Ui::OnSwitchReleased(const Event& e) {
       break;
     
     case SWITCH_X_MODE:
-      // In Grids mode, only cycle on short tap
-      if (state->t_model != T_GENERATOR_MODEL_GRIDS || e.data < 275) {
-        state->x_control_mode = (state->x_control_mode + 1) % 3;
+      {
+        bool is_long = e.data >= kLongPressDuration;
+        bool is_tap = e.data < 275;
+        if (!is_long && !is_tap) break;
+        if (state->x_control_mode >= 3) {
+          if (is_long) {
+            state->x_control_mode -= 3;
+          } else {
+            state->x_control_mode = 3 + (state->x_control_mode - 3 + 1) % 2;
+          }
+        } else {
+          if (is_long) {
+            state->x_control_mode = 3;
+          } else {
+            state->x_control_mode = (state->x_control_mode + 1) % 3;
+          }
+        }
+        if (is_long && state->t_model >= T_GENERATOR_MODEL_GRIDS) {
+          x_mode_flash_time_ = system_clock.milliseconds() | 1;
+        }
         SaveState();
       }
       break;
-      
+
     case SWITCH_X_EXT:
       if (mode_ == UI_MODE_RECORD_SCALE) {
         int scale_index = settings_->state().x_scale;
@@ -656,7 +738,7 @@ void Ui::OnSwitchReleased(const Event& e) {
         mode_ = UI_MODE_RECORD_SCALE;
         scale_recorder_->Clear();
       } else {
-        state->x_register_mode = !state->x_register_mode;
+        state->x_register_mode = (state->x_register_mode + 1) % X_REGISTER_MODE_LAST;
         SaveState();
       }
       break;
@@ -664,6 +746,10 @@ void Ui::OnSwitchReleased(const Event& e) {
     case SWITCH_X_RANGE:
       if (mode_ >= UI_MODE_CALIBRATION_1 && mode_ <= UI_MODE_CALIBRATION_4) {
         NextCalibrationStep();
+      } else if (state->x_control_mode == 4) {  // CONTROL_MODE_ENVELOPE
+        if (e.data < kLongPressDuration) {
+          state->x_range = (state->x_range + 1) % 3;  // retrigger mode
+        }
       } else if (e.data >= kLongPressDuration) {
         if (mode_ == UI_MODE_NORMAL) {
           mode_ = UI_MODE_SELECT_SCALE;
@@ -671,7 +757,7 @@ void Ui::OnSwitchReleased(const Event& e) {
       } else if (mode_ == UI_MODE_SELECT_SCALE) {
         state->x_scale = (state->x_scale + 1) % kNumScales;
       } else {
-        if (!state->x_register_mode) {
+        if (state->x_register_mode != X_REGISTER_MODE_REGISTER) {
           state->x_range = (state->x_range + 1) % 3;
         }
       }
@@ -808,7 +894,7 @@ void Ui::DoEvents() {
   if (queue_.idle_time() > 800 && mode_ == UI_MODE_PANIC) {
     mode_ = UI_MODE_NORMAL;
   }
-  if (mode_ == UI_MODE_SELECT_SCALE || mode_ == UI_MODE_DISPLAY_RESET_MODE) {
+  if (mode_ == UI_MODE_SELECT_SCALE) {
     if (queue_.idle_time() > 4000) {
       mode_ = UI_MODE_NORMAL;
       queue_.Touch();
