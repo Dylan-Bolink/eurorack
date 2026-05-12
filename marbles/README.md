@@ -153,7 +153,7 @@ Long press **T Mode** while on drum mode (solid red) to enter Grids mode (blinki
 
 ## Standard Controls
 
-<img src="images/truchets_cheatsheet_1.png" style="width:500px;">
+<img src="../images/truchets_cheatsheet_1.png" style="width:500px;">
 
 ### Density Knobs
 
@@ -193,7 +193,7 @@ The Deja Vu section controls pattern looping:
 
 > All shift layer parameters have a neutral position at noon (12 o'clock), meaning they have no effect on the sound until you turn them.
 
-<img src="images/truchets_cheatsheet_2.png" style="width:500px;">
+<img src="../images/truchets_cheatsheet_2.png" style="width:500px;">
 
 ### Groove Offset (x Bias)
 
@@ -269,7 +269,7 @@ Change the pattern coordinates on the current bank.
 
 **Hold X Mode** and press buttons to access CV routing and bank select.
 
-<img src="images/truchets_cheatsheet_3.png" style="width:500px;">
+<img src="../images/truchets_cheatsheet_3.png" style="width:500px;">
 
 ### Pattern Banks
 
@@ -319,7 +319,7 @@ Hold **X Mode** + tap **T Mode** to cycle through pattern banks:
 
 **Hold T Mode** and press buttons to toggle advanced settings.
 
-<img src="images/truchets_cheatsheet_4.png" style="width:500px;">
+<img src="../images/truchets_cheatsheet_4.png" style="width:500px;">
 
 | Hold T Mode + Press | Setting | Off (default) | On (LED lit) |
 |----------------------|---------|---------------|--------------|
