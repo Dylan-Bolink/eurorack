@@ -211,9 +211,13 @@ Same behavior as the normal frequency alt output:
 
 ## Patching Ideas
 
-- Use the formant engine with the alt output and a slow LFO on the shift CV. The fixed formant creates evolving vowel textures as the driver pitch moves independently.
-- The chord and different frequency mode alt outputs (root + mix + odd + even) into a stereo mixer give instant wide chord pads. Pan odd and even hard left/right.
-- MORE PATCHES!
+- **Formant** mode has some unstable glitch moments when a envelope attack phase just barely takes longer than a cycle from the driver oscillator. Use this to your advantage.
+- The **Chord** and **Frequency** mode **alt** outputs (root + mix + odd + even) into a stereo mixer give instant wide chord pads. Pan odd and even hard left/right.
+- With **alt** output on in **Frequency** mode, the second output (mix) can give great supersaw sounds when you are just off 12 o'clock with the **Shift** knob.
+- **Slope / Phase** output mode with **alt** on can be a great stereo oscillator where the shape is different from left and right.
+- At high speed the **Attractors** can be a great noise source.
+- Use outputs to self-modulate Tides. In **Formant**, outputs 3 and 4 can be patched to most parameters without creating a mess with feedback.
+- **Formant** mode can work great as a weird envelope generator.
 
 <br>
 
