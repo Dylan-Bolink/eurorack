@@ -183,48 +183,6 @@ class Attractors {
     r_coordinates_.z = z;
   }
 
-  /*float ProcessHenonAttractor(float f) {
-
-    float frequency = f;
-    switch (speed_) {
-        case SLOW:
-        frequency /= 8.0f;
-        break;
-        case FAST:
-        break;
-        default:
-        frequency /= 4.0f;
-        break;
-    }
-
-    CONSTRAIN(frequency, 0.0f, 0.25f);
-    frequency *= 32.0f;
-
-    const float max_a = 1.5f;
-    const float min_a = 0.05f;
-    float a = ((max_a - min_a) * thomas_ + min_a);
-    float b = 0.3f;
-    CONSTRAIN(a, min_a, max_a);
-
-    const float amp = 0.5f;
-    float x = tx_;
-    float y = ty_;
-    float z = tz_;
-    
-    float nextX = 1 - a * x * x + y;
-    float nextY = b * x;
-
-    x += frequency * dx;
-    y += frequency * dy;
-    z += frequency * dz;
-
-    tx_ = x;
-    ty_ = y;
-    tz_ = z;
-
-    return amp * (y - 2.f) * gain_;
-  }*/
-
   void ProcessThomasSymmetricAttractor(float frequency) {
     switch (speed_) {
         case SLOW:

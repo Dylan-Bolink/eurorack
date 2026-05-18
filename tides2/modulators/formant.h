@@ -33,8 +33,8 @@ class FormantEngine {
     next_sample_sub_ = 0.0f;
     sub_state_ = false;
     prev_hollow_state_ = 0;
-    std::fill(&lp_1_[0], &lp_1_[2], 0.0f);
-    std::fill(&lp_2_[0], &lp_2_[2], 0.0f);
+    lp_1_ = 0.0f;
+    lp_2_ = 0.0f;
   }
 
   void Render(
@@ -248,9 +248,9 @@ class FormantEngine {
       for (size_t s = 0; s < size; ++s) {
         float f = f0 * 0.5f;
         f += (1.0f - f) * ratio;
-        ONE_POLE(lp_1_[0], out[s].channel[0], f);
-        ONE_POLE(lp_2_[0], lp_1_[0], f);
-        out[s].channel[0] = lp_2_[0];
+        ONE_POLE(lp_1_, out[s].channel[0], f);
+        ONE_POLE(lp_2_, lp_1_, f);
+        out[s].channel[0] = lp_2_;
       }
     }
   }
@@ -270,8 +270,8 @@ class FormantEngine {
   float prev_pw_;
   float prev_shape_;
 
-  float lp_1_[2];
-  float lp_2_[2];
+  float lp_1_;
+  float lp_2_;
 
   DISALLOW_COPY_AND_ASSIGN(FormantEngine);
 };
