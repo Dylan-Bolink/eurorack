@@ -66,8 +66,6 @@ class Differentiator {
   DISALLOW_COPY_AND_ASSIGN(Differentiator);
 };
 
-extern const float lut_warps_bipolar_fold[];
-
 class WavetableEngine {
  public:
   WavetableEngine() { }
@@ -97,13 +95,6 @@ class WavetableEngine {
           1024.0f) : 0.0f;
       return 8.0f * (value + (folded - value) * fold_amount);
     }
-  }
-
-  inline float warps_fold(float value, float fold_amount) {
-    const float kScale = 2048.0f / ((1.0f + 1.0f + 0.25f) * 1.02f);
-    float amount = 0.02f + fold_amount;
-    float folded = Interpolate(lut_warps_bipolar_fold + 2048, value * amount, kScale) * -10.0f;
-    return folded;
   }
 
   inline void filter(float frequency, float smoothness, PolySlopeGenerator::OutputSample* out, size_t size) {
