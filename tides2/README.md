@@ -58,7 +58,7 @@ Long-press **Output mode** to toggle the alt output. Alt output changes the beha
 
 ### <img src="https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_2018/images/mode_0.png" style="width:27px; height: 27px; transform: translateY(5px); margin-right: 5px;"> Alt: Normal
 
-Replaces the wavefolder with a more crude digital wavefolder.
+Replaces the wavefolder on output 1 with a more crude wavefolder.
 
 <a id="alt-amplitude"></a>
 
@@ -106,20 +106,22 @@ The new specialized synthesis engines can be selected by setting **Ramp mode** t
 
 Two chaotic attractor systems running simultaneously.
 
+| Knob / input | Function |
+|------|----------|
+| **Frequency** | Lorenz freq / Thomas freq |
+| **Shape** | Rossler freq / Chua freq |
+| **Slope** | Lorenz chaos / Thomas damping |
+| **Smoothness** | Rossler chaos / Chua drive |
+| **Shift** | Output gain |
+| **Trig** | Resets attractor pair 1 (Lorenz / Thomas) |
+| **Clock** | Resets attractor pair 2 (Rossler / Chua) |
+
 | Output | Normal | Alt |
 |--------|--------|-----|
 | **1** | Lorenz X | Thomas X |
 | **2** | Lorenz Y | Thomas Y |
 | **3** | Rossler X | Chua X |
 | **4** | Rossler Y | Chua Y |
-
-| Knob / input | Function |
-|------|----------|
-| **Slope** | Lorenz chaos / Thomas damping |
-| **Smoothness** | Rossler chaos / Chua drive |
-| **Shift** | Output gain |
-| **Trig** | Resets attractor pair 1 (Lorenz / Thomas) |
-| **Clock** | Resets attractor pair 2 (Rossler / Chua) |
 
 #### Alt: Thomas + Chua
 
@@ -136,8 +138,8 @@ A driver oscillator excites a Serge style envelope generator (formant envelope).
 | Knob | Function |
 |------|----------|
 | **Frequency** | Driver frequency |
-| **Slope** | AD balance control of the formant envelope |
 | **Shape** | Shape of formant envelope |
+| **Slope** | AD balance control of the formant envelope |
 | **Smoothness** | Filtering/wavefolding the formant envelope |
 | **Shift** | Formant frequency ratio (+-48 semitones) |
 
@@ -167,6 +169,22 @@ The formant frequency no longer tracks the driver pitch. Instead, **Shift** sets
 
 A 3D wave terrain synthesizer. Three knobs navigate a grid of wavetables.
 
+| Knob | Function |
+|------|----------|
+| **Shape** | Bank |
+| **Slope** | X axis |
+| **Smoothness** | Low-pass filtering |
+| **Shift** | Y axis |
+
+Through shape we interpolate through the following wavebanks:
+Bank A: harmonically poor waveforms obtained by additive synthesis (sine harmonics, drawbar organ waveforms).
+Bank B: harmonically rich waveforms obtained by formant synthesis or waveshaping.
+Bank C: wavetables from the Shruthi-1 / Ambika, sampled from classic wavetable or ROM playback synths.
+Bank D: noise-derived wavetables — jagged, inharmonic shapes that produce gritty textures rather than pitched tones.
+
+> Bank ABC come from the plaits source code. Bank D is added to this.
+
+
 | Output | Function |
 |--------|----------|
 | **1** | Wavetable bipolar |
@@ -176,12 +194,6 @@ A 3D wave terrain synthesizer. Three knobs navigate a grid of wavetables.
 
 > The 1-bit output is a nod to the [**_sheep_**](https://pichenettes.github.io/mutable-instruments-documentation/modules/tides_original/firmware/) firmware.
 
-| Knob | Function |
-|------|----------|
-| **Slope** | X axis |
-| **Shift** | Y axis |
-| **Shape** | Z axis |
-| **Smoothness** | Low-pass filtering |
 
 #### Alt: No Interpolation
 

@@ -60,24 +60,15 @@ void WavetableEngine::Init() {
   fill(&lp_2_[0], &lp_2_[2], 0.0f);
 }
 
-inline float Clamp(float x, float amount) {
-  x = x - 0.5f;
-  x *= amount;
-  CONSTRAIN(x, -0.5f, 0.5f);
-  x += 0.5f;
-  return x;
-}
-
 inline float ReadWave(
   int x,
   int y,
   int z,
-  int randomize,
   int phase_integral,
   float phase_fractional) {
-  int wave = ((x + y * 8 + z * 64) * randomize) % 192;
+  const int idx = x + y * 8;
   return InterpolateWaveHermite(
-      wav_integrated_waves + wave * (table_size + 4),
+      wav_integrated_waves + (z * 64 + idx) * (table_size + 4),
       phase_integral,
       phase_fractional);
 }
@@ -92,22 +83,22 @@ void WavetableEngine::Render(
   
   ONE_POLE(x_pre_lp_, parameters.slope * 6.9999f, 0.2f);
   ONE_POLE(y_pre_lp_, parameters.shift * 6.9999f, 0.2f);
-  ONE_POLE(z_pre_lp_, parameters.shape * 2.9999f, 0.05f);
+  const float kBreak = 0.85f;
+  const float kPlaitsScale = 3.0f / kBreak;
+  const float kNoiseScale  = 0.9999f / (1.0f - kBreak);
+  float z_target = (parameters.shape < kBreak)
+      ? parameters.shape * kPlaitsScale
+      : 3.0f + (parameters.shape - kBreak) * kNoiseScale;
+  ONE_POLE(z_pre_lp_, z_target, 0.05f);
   
   const float x = x_pre_lp_;
   const float y = y_pre_lp_;
   const float z = z_pre_lp_;
   
-  const float quantization = min(max(z - 3.0f, 0.0f), 1.0f);
-  
   MAKE_INTEGRAL_FRACTIONAL(x);
   MAKE_INTEGRAL_FRACTIONAL(y);
   MAKE_INTEGRAL_FRACTIONAL(z);
   
-  x_fractional += quantization * (Clamp(x_fractional, 16.0f) - x_fractional);
-  y_fractional += quantization * (Clamp(y_fractional, 16.0f) - y_fractional);
-  z_fractional += quantization * (Clamp(z_fractional, 16.0f) - z_fractional);
-
   if (alt_mode) {
     x_fractional = 0.0f;
     y_fractional = 0.0f;
@@ -166,31 +157,28 @@ void WavetableEngine::Render(
     int z1 = z_integral + 1;
 
     if (z0 >= 4) {
-      z0 -= 4;
+      z0 = 3;
     }
     if (z1 >= 4) {
-      z1 -= 4;
+      z1 = 3;
     }
 
-    int r0 = z0 == 3 ? 101 : 1;
-    int r1 = z1 == 3 ? 101 : 1;
-    
-    float x0y0z0 = ReadWave(x0, y0, z0, r0, p_integral, p_fractional);
-    float x1y0z0 = ReadWave(x1, y0, z0, r0, p_integral, p_fractional);
+    float x0y0z0 = ReadWave(x0, y0, z0, p_integral, p_fractional);
+    float x1y0z0 = ReadWave(x1, y0, z0, p_integral, p_fractional);
     float xy0z0 = x0y0z0 + (x1y0z0 - x0y0z0) * x_fractional;
 
-    float x0y1z0 = ReadWave(x0, y1, z0, r0, p_integral, p_fractional);
-    float x1y1z0 = ReadWave(x1, y1, z0, r0, p_integral, p_fractional);
+    float x0y1z0 = ReadWave(x0, y1, z0, p_integral, p_fractional);
+    float x1y1z0 = ReadWave(x1, y1, z0, p_integral, p_fractional);
     float xy1z0 = x0y1z0 + (x1y1z0 - x0y1z0) * x_fractional;
 
     float xyz0 = xy0z0 + (xy1z0 - xy0z0) * y_fractional;
 
-    float x0y0z1 = ReadWave(x0, y0, z1, r1, p_integral, p_fractional);
-    float x1y0z1 = ReadWave(x1, y0, z1, r1, p_integral, p_fractional);
+    float x0y0z1 = ReadWave(x0, y0, z1, p_integral, p_fractional);
+    float x1y0z1 = ReadWave(x1, y0, z1, p_integral, p_fractional);
     float xy0z1 = x0y0z1 + (x1y0z1 - x0y0z1) * x_fractional;
 
-    float x0y1z1 = ReadWave(x0, y1, z1, r1, p_integral, p_fractional);
-    float x1y1z1 = ReadWave(x1, y1, z1, r1, p_integral, p_fractional);
+    float x0y1z1 = ReadWave(x0, y1, z1, p_integral, p_fractional);
+    float x1y1z1 = ReadWave(x1, y1, z1, p_integral, p_fractional);
     float xy1z1 = x0y1z1 + (x1y1z1 - x0y1z1) * x_fractional;
     
     float xyz1 = xy0z1 + (xy1z1 - xy0z1) * y_fractional;

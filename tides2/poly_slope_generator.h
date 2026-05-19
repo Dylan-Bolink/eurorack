@@ -323,8 +323,8 @@ class PolySlopeGenerator {
           const float slope = ramp_waveshaper_[0].Shape<
                 ramp_mode>(raw, shape_table, shape_fractional);
           if (alt_mode_) {
-            out[i].channel[0] = AltFold(slope, fold, ramp_mode == RAMP_MODE_LOOPING) * shift;
-            out[i].channel[1] = AltFold(slope, fold, false) * shift;
+            out[i].channel[0] = AsymmetricFold(slope, fold) * shift;
+            out[i].channel[1] = AsymmetricFold(slope, fold) * shift;
           } else {
             out[i].channel[0] = Fold<ramp_mode>(slope, fold) * shift;
             out[i].channel[1] = Fold<RAMP_MODE_MOD>(slope, fold) * shift;
@@ -453,27 +453,9 @@ class PolySlopeGenerator {
     }
   }
 
-  inline float AltFold(float unipolar, float fold_amount, bool looping) {
-    if (looping) {
-      float bipolar = 2.0f * unipolar - 1.0f;
-      if (fold_amount <= 0.0f) return 5.0f * bipolar;
-      float x = bipolar * (1.0f + fold_amount * 7.0f);
-      float t = (x - 1.0f) * 0.25f;
-      int32_t ti = static_cast<int32_t>(t);
-      if (t < static_cast<float>(ti)) ti--;
-      float m = t - static_cast<float>(ti);
-      return 5.0f * (fabsf(m * 4.0f - 2.0f) - 1.0f);
-    } else {
-      if (fold_amount <= 0.0f) return 8.0f * unipolar;
-      float x = unipolar * (1.0f + fold_amount * 7.0f);
-      float t = x * 0.5f + 0.5f;
-      int32_t ti = static_cast<int32_t>(t);
-      if (t < static_cast<float>(ti)) ti--;
-      float m = t - static_cast<float>(ti);
-      return 8.0f * fabsf(m * 2.0f - 1.0f);
-    }
-  }
-  
+  // Asymmetric wavefolder with saturation.  Used in the OUTPUT_MODE_GATES 
+  static float AsymmetricFold(float unipolar, float fold_amount);
+
   inline void Filter(float* f, PolySlopeGenerator::OutputSample* out, size_t channels, size_t size) {
     for (size_t s = 0; s < size; s++) {
       for (size_t i = 0; i < channels; ++i) {
@@ -520,8 +502,8 @@ class PolySlopeGenerator {
   int ratio_override_size_;
   bool alt_mode_;
 
-  static Ratio audio_ratio_table_[21][num_channels];
-  static Ratio control_ratio_table_[21][num_channels];
+  static const Ratio audio_ratio_table_[21][num_channels];
+  static const Ratio control_ratio_table_[21][num_channels];
   static RenderFn render_fn_table_[RAMP_MODE_LAST][OUTPUT_MODE_LAST][
       RANGE_LAST];
 
