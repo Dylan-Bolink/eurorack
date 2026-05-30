@@ -74,6 +74,7 @@ void Ui::Init(Settings* settings, FactoryTest* factory_test, CvReader* cv_reader
   
   fill(&press_time_[0], &press_time_[SWITCH_LAST], 0);
   fill(&ignore_release_[0], &ignore_release_[SWITCH_LAST], false);
+  mode_led_flashing_ = false;
 }
 
 void Ui::Poll() {
@@ -137,25 +138,36 @@ void Ui::UpdateLEDs() {
         const State& s = settings_->state();
         bool color_blind = s.color_blind == 1;
         
-        leds_.set(LED_MODE, MakeColor(s.mode, color_blind));
+        LedColor mode_color = MakeColor(s.mode, color_blind);
+        if (mode_led_flashing_) {
+          uint32_t elapsed = system_clock.milliseconds() - mode_led_flash_start_ms_;
+          if (elapsed < 300) {
+            mode_color = MakeColor(elapsed / 100, color_blind);
+          } else {
+            mode_led_flashing_ = false;
+          }
+        }
+        leds_.set(LED_MODE, mode_color);
         if (cv_reader_->lock_active()) {
-          bool fast_blink = system_clock.milliseconds() & 128;
-          leds_.set(LED_RANGE, fast_blink ? MakeColor(cv_reader_->lock_mode(), color_blind) : LED_COLOR_OFF);
+          uint8_t pwm = system_clock.milliseconds() & 15;
+          uint8_t tri = (system_clock.milliseconds() >> 4) & 31;
+          tri = tri < 16 ? tri : 31 - tri;
+          leds_.set(LED_RANGE, pwm < tri ? MakeColor(cv_reader_->lock_mode(), color_blind) : LED_COLOR_OFF);
         } else {
           leds_.set(LED_RANGE, MakeColor(s.range, color_blind));
         }
         if (s.alt_mode) {
           LedColor output_color = MakeColor((s.output_mode + 3) % 4, color_blind);
+          uint8_t pwm = system_clock.milliseconds() & 15;
+          uint8_t tri = (system_clock.milliseconds() >> 4) & 31;
+          tri = tri < 16 ? tri : 31 - tri;
           if (output_color == LED_COLOR_OFF) {
-            // No led cycle through colors
-            uint32_t slot = (system_clock.milliseconds() / 128) % 4;
-            LedColor color = LED_COLOR_OFF;
-            if (slot == 0) color = LED_COLOR_GREEN;
-            else if (slot == 2) color = LED_COLOR_RED;
-            leds_.set(LED_SHIFT, color);
+            // No mode color — breathe green and red alternately.
+            LedColor base_color = ((system_clock.milliseconds() / 512) & 1)
+                ? LED_COLOR_RED : LED_COLOR_GREEN;
+            leds_.set(LED_SHIFT, pwm < tri ? base_color : LED_COLOR_OFF);
           } else {
-            bool alt_blink = system_clock.milliseconds() & 128;
-            leds_.set(LED_SHIFT, alt_blink ? output_color : LED_COLOR_OFF);
+            leds_.set(LED_SHIFT, pwm < tri ? output_color : LED_COLOR_OFF);
           }
         } else {
           leds_.set(LED_SHIFT, MakeColor((s.output_mode + 3) % 4, color_blind));
@@ -199,6 +211,18 @@ void Ui::OnSwitchReleased(const Event& e) {
       if (!cv_reader_->clock_patched()) {
         cv_reader_->SetFrequencyLocked(!cv_reader_->frequency_locked());
       }
+    } else if (e.control_id == SWITCH_MODE) {
+      // Locked: resetttle
+      // Unlocked: restore
+      if (!cv_reader_->clock_patched()) {
+        if (cv_reader_->frequency_locked()) {
+          cv_reader_->RecaptureFrequencyLock();
+        } else {
+          cv_reader_->RestoreFrequencyLock();
+        }
+        mode_led_flash_start_ms_ = system_clock.milliseconds();
+        mode_led_flashing_ = true;
+      }
     } else if (e.control_id == SWITCH_SHIFT) {
       State* s = settings_->mutable_state();
       s->alt_mode = s->alt_mode ? 0 : 1;
@@ -218,7 +242,7 @@ void Ui::OnSwitchReleased(const Event& e) {
     }
     State* s = settings_->mutable_state();
     s->frequency_locked = cv_reader_->frequency_locked() ? 1 : 0;
-    s->set_locked_frequency(cv_reader_->lock_reference_pot());
+    s->set_locked_frequency(cv_reader_->locked_anchor_semitones());
     s->set_lock_mode(cv_reader_->lock_mode());
     switch (e.control_id) {
       case SWITCH_MODE:

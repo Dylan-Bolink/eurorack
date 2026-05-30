@@ -43,6 +43,14 @@ Long-press **Range** again to unlock.
 
 > Frequency lock is only stored when you change **Output mode** or **Ramp mode** . This is because you would otherwise hear a disruption in your sound.
 
+### Restore and resettle frequency
+
+While no frequency is locked, long-press **Ramp mode** to lock to the last locked frequency, effectively restoring it.
+
+Long-press **Ramp mode** while a frequency is already locked to anchor the currently transposed pitch as the new locked frequency.
+
+> On restoring or resettling the frequency, the Ramp mode LED briefly shows all colors in a cycle.
+
 <br>
 
 ## Alt Output

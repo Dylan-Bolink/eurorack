@@ -77,6 +77,8 @@ class Ui {
   Switches switches_;
   uint32_t press_time_[SWITCH_LAST];
   bool ignore_release_[SWITCH_LAST];
+  uint32_t mode_led_flash_start_ms_;
+  bool     mode_led_flashing_;
   
   Settings* settings_;
   FactoryTest* factory_test_;

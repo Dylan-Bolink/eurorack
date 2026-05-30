@@ -56,12 +56,14 @@ class CvReader {
   }
 
   void    SetFrequencyLocked(bool locked);
+  void    RestoreFrequencyLock();
+  void    RecaptureFrequencyLock();
   void    SetLockMode(uint8_t mode);
-  bool    frequency_locked()   const { return frequency_locked_; }
-  bool    clock_patched()      const { return clock_patched_; }
-  bool    lock_active()        const { return frequency_locked_ && !clock_patched_; }
-  float   lock_reference_pot() const { return lock_reference_pot_; }
-  uint8_t lock_mode()          const { return lock_mode_; }
+  bool    frequency_locked()        const { return frequency_locked_; }
+  bool    clock_patched()           const { return clock_patched_; }
+  bool    lock_active()             const { return frequency_locked_ && !clock_patched_; }
+  float   locked_anchor_semitones() const { return locked_note_semitones_; }
+  uint8_t lock_mode()               const { return lock_mode_; }
   
   inline float CenterDetent(float x) const {
     if (x < 0.49f) {
@@ -83,10 +85,12 @@ class CvReader {
   float alt_note_lp_;
   bool  frequency_locked_;
   bool  clock_patched_;             // last observed CLOCK gate patched state
-  float locked_note_semitones_;     // locked pitch in semitones (post-CenterDetent, exact)
-  float lock_reference_pot_;        // raw pot position at lock time (for delta calc)
+  float locked_note_semitones_;
   float previous_pot_value_;
   uint8_t lock_mode_;               // 0=semitones, 1=fifths+oct, 2=octaves
+  int8_t  last_locked_semitone_offset_;
+  bool    pickup_engaged_;
+  bool    pickup_disengage_side_;
   stmlib::HysteresisQuantizer octave_quantizer_;
 
   CvReaderChannel cv_reader_channel_[kNumParameters];

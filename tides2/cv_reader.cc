@@ -54,10 +54,12 @@ void CvReader::Init(Settings* settings) {
   frequency_locked_       = s.frequency_locked != 0;
   clock_patched_          = false;
   lock_mode_              = s.get_lock_mode() % 3;
-  float stored_pot        = s.get_locked_frequency();
-  locked_note_semitones_  = CenterDetent(stored_pot) * 96.0f - 48.0f;
-  lock_reference_pot_     = stored_pot;
-  previous_pot_value_     = stored_pot;
+  locked_note_semitones_  = s.get_locked_frequency();
+  CONSTRAIN(locked_note_semitones_, -96.0f, 96.0f);
+  previous_pot_value_     = 0.5f;
+  last_locked_semitone_offset_ = 0;
+  pickup_engaged_         = false;
+  pickup_disengage_side_  = false;
 }
 
 float kShapeBreakpoints[] = {
@@ -67,10 +69,32 @@ float kShapeBreakpoints[] = {
 void CvReader::SetFrequencyLocked(bool locked) {
   if (locked && !frequency_locked_) {
     locked_note_semitones_ = CenterDetent(previous_pot_value_) * 96.0f - 48.0f;
-    lock_reference_pot_    = previous_pot_value_;
+    CONSTRAIN(locked_note_semitones_, -96.0f, 96.0f);
+    pickup_engaged_ = false;
+    pickup_disengage_side_ = (previous_pot_value_ >= 0.5f);
     octave_quantizer_.Init();
   }
   frequency_locked_ = locked;
+}
+
+void CvReader::RestoreFrequencyLock() {
+  if (!frequency_locked_) {
+    pickup_engaged_ = false;
+    pickup_disengage_side_ = (previous_pot_value_ >= 0.5f);
+    octave_quantizer_.Init();
+    frequency_locked_ = true;
+  }
+}
+
+void CvReader::RecaptureFrequencyLock() {
+  // disengage the pot until it crosses center. Caller guards clock_patched_.
+  if (!frequency_locked_) return;
+  if (fabsf(previous_pot_value_ - 0.5f) < 0.05f) return;  // deadband: nothing to promote
+  locked_note_semitones_ += last_locked_semitone_offset_;
+  CONSTRAIN(locked_note_semitones_, -96.0f, 96.0f);
+  pickup_engaged_ = false;
+  pickup_disengage_side_ = (previous_pot_value_ >= 0.5f);
+  octave_quantizer_.Init();
 }
 
 void CvReader::SetLockMode(uint8_t mode) {
@@ -86,29 +110,42 @@ void CvReader::Read(IOBuffer::Block* block) {
 
   float note;
   if (frequency_locked_ && !block->input_patched[1]) {
-    float delta = raw_pot - lock_reference_pot_;
-    if (fabsf(delta) < 0.05f) delta = 0.0f;  // deadband: snap to locked pitch within ±5%
-    float normalized = delta + 0.5f;
-    CONSTRAIN(normalized, 0.0f, 1.0f);
-    int semitone_offset;
-
-    if (lock_mode_ == 0) {
-      // Semitones: 25 steps, ±12 semitones (±1 octave)
-      int step = octave_quantizer_.Process(normalized, 25, 0.25f);
-      semitone_offset = step - 12;
-    } else if (lock_mode_ == 1) {
-      // Fifths + octaves: 9 snap points across ±2 octaves
-      static const int kFifths[9] = {-24, -19, -12, -7, 0, 7, 12, 19, 24};
-      int step = octave_quantizer_.Process(normalized, 9, 0.25f);
-      semitone_offset = kFifths[step];
-    } else {
-      // Octaves: 9 steps, ±4 octaves
-      int step = octave_quantizer_.Process(normalized, 9, 0.25f);
-      semitone_offset = (step - 4) * 12;
+    // fix for audible jumps when locking frequency
+    if (!pickup_engaged_) {
+      bool crossed = pickup_disengage_side_
+          ? (raw_pot <= 0.5f)
+          : (raw_pot >= 0.5f);
+      if (crossed) {
+        pickup_engaged_ = true;
+        octave_quantizer_.Init();
+      }
     }
 
+    int semitone_offset = 0;
+    if (pickup_engaged_) {
+      float normalized = raw_pot;
+      if (fabsf(normalized - 0.5f) < 0.05f) normalized = 0.5f;  // deadband around center
+      CONSTRAIN(normalized, 0.0f, 1.0f);
+
+      if (lock_mode_ == 0) {
+        // Semitones: 25 steps, ±12 semitones (±1 octave)
+        int step = octave_quantizer_.Process(normalized, 25, 0.25f);
+        semitone_offset = step - 12;
+      } else if (lock_mode_ == 1) {
+        // Fifths + octaves: 9 snap points across ±2 octaves
+        static const int kFifths[9] = {-24, -19, -12, -7, 0, 7, 12, 19, 24};
+        int step = octave_quantizer_.Process(normalized, 9, 0.25f);
+        semitone_offset = kFifths[step];
+      } else {
+        // Octaves: 9 steps, ±4 octaves
+        int step = octave_quantizer_.Process(normalized, 9, 0.25f);
+        semitone_offset = (step - 4) * 12;
+      }
+    }
+    last_locked_semitone_offset_ = static_cast<int8_t>(semitone_offset);
+
     float target_semitones = locked_note_semitones_ + semitone_offset;
-    CONSTRAIN(target_semitones, -48.0f, 48.0f);
+    CONSTRAIN(target_semitones, -96.0f, 96.0f);
     float target_pot = (target_semitones + 48.0f) / 96.0f;
 
     // Run through the same channel as unlocked — CV path is completely unchanged.

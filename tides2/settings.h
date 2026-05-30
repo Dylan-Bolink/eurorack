@@ -72,14 +72,17 @@ struct State {
 
   enum { tag = 0x54415453 };  // STAT
 
-  inline void set_locked_frequency(float f) {
-    uint16_t v = static_cast<uint16_t>(f * 65535.0f);
+  inline void set_locked_frequency(float semitones) {
+    float t = (semitones + 96.0f) / 192.0f;
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    uint16_t v = static_cast<uint16_t>(t * 65535.0f);
     locked_frequency_hi = static_cast<uint8_t>(v >> 8);
     locked_frequency_lo = static_cast<uint8_t>(v & 0xFF);
   }
   inline float get_locked_frequency() const {
     uint16_t v = (static_cast<uint16_t>(locked_frequency_hi) << 8) | locked_frequency_lo;
-    return v / 65535.0f;
+    return (v / 65535.0f) * 192.0f - 96.0f;
   }
   inline void set_lock_mode(uint8_t m) { frequency_lock_mode = m; }
   inline uint8_t get_lock_mode() const { return frequency_lock_mode; }
