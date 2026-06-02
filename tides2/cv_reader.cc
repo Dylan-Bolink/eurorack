@@ -89,7 +89,7 @@ void CvReader::RestoreFrequencyLock() {
 void CvReader::RecaptureFrequencyLock() {
   // disengage the pot until it crosses center. Caller guards clock_patched_.
   if (!frequency_locked_) return;
-  if (fabsf(previous_pot_value_ - 0.5f) < 0.05f) return;  // deadband: nothing to promote
+  if (fabsf(previous_pot_value_ - 0.5f) < LockCenterHalfWidth()) return;  // inside center step: nothing to promote
   locked_note_semitones_ += last_locked_semitone_offset_;
   CONSTRAIN(locked_note_semitones_, -96.0f, 96.0f);
   pickup_engaged_ = false;
@@ -112,9 +112,10 @@ void CvReader::Read(IOBuffer::Block* block) {
   if (frequency_locked_ && !block->input_patched[1]) {
     // fix for audible jumps when locking frequency
     if (!pickup_engaged_) {
+      float half = LockCenterHalfWidth();
       bool crossed = pickup_disengage_side_
-          ? (raw_pot <= 0.5f)
-          : (raw_pot >= 0.5f);
+          ? (raw_pot <= 0.5f + half)
+          : (raw_pot >= 0.5f - half);
       if (crossed) {
         pickup_engaged_ = true;
         octave_quantizer_.Init();
@@ -124,7 +125,7 @@ void CvReader::Read(IOBuffer::Block* block) {
     int semitone_offset = 0;
     if (pickup_engaged_) {
       float normalized = raw_pot;
-      if (fabsf(normalized - 0.5f) < 0.05f) normalized = 0.5f;  // deadband around center
+      if (fabsf(normalized - 0.5f) < LockCenterHalfWidth()) normalized = 0.5f;  // snap inside center step
       CONSTRAIN(normalized, 0.0f, 1.0f);
 
       if (lock_mode_ == 0) {

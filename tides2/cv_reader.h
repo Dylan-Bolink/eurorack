@@ -65,6 +65,12 @@ class CvReader {
   float   locked_anchor_semitones() const { return locked_note_semitones_; }
   uint8_t lock_mode()               const { return lock_mode_; }
   
+  inline float LockCenterHalfWidth() const {
+    // Half-width mode 0:25 1,2:9 plus a small margin so pickup engages
+    const float half = lock_mode_ == 0 ? (0.5f / 24.0f) : (0.5f / 8.0f);
+    return half + 0.005f;
+  }
+
   inline float CenterDetent(float x) const {
     if (x < 0.49f) {
       x *= 1.02040816f;
