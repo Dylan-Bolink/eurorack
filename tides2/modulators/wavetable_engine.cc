@@ -56,8 +56,8 @@ void WavetableEngine::Init() {
   phases_[1] = 0.0f;
   next_sample_tri_ = 0.0f;
   diff_out_.Init();
-  fill(&lp_1_[0], &lp_1_[2], 0.0f);
-  fill(&lp_2_[0], &lp_2_[2], 0.0f);
+  fill(&lp_1_[0], &lp_1_[4], 0.0f);
+  fill(&lp_2_[0], &lp_2_[4], 0.0f);
 }
 
 inline float ReadWave(

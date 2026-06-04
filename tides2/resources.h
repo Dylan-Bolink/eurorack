@@ -42,9 +42,9 @@ namespace tides {
 
 typedef uint8_t ResourceId;
 
-extern const float* const lookup_table_table[];
+extern const float* lookup_table_table[];
 
-extern const int16_t* const lookup_table_i16_table[];
+extern const int16_t* lookup_table_i16_table[];
 
 extern const float lut_sine[];
 extern const float lut_bipolar_fold[];

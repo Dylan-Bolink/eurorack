@@ -1395,7 +1395,7 @@ const float lut_asym_neg_fold[] = {
 };
 
 
-const float* const lookup_table_table[] = {
+const float* lookup_table_table[] = {
   lut_sine,
   lut_bipolar_fold,
   lut_unipolar_fold,
@@ -4482,7 +4482,7 @@ const int16_t lut_wavetable[] = {
 };
 
 
-const int16_t* const lookup_table_i16_table[] = {
+const int16_t* lookup_table_i16_table[] = {
   lut_wavetable,
 };
 

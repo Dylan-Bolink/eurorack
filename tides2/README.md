@@ -49,7 +49,7 @@ While no frequency is locked, long-press **Ramp mode** to lock to the last locke
 
 Long-press **Ramp mode** while a frequency is already locked to anchor the currently transposed pitch as the new locked frequency.
 
-> On restoring or resettling the frequency, the Ramp mode LED briefly shows all colors in a cycle.
+> On locking or resettling the frequency, the frequency knob needs to re-enter the center zone. This prevents unwanted frequency changes.
 
 <br>
 

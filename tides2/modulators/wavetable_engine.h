@@ -227,6 +227,6 @@ inline float InterpolateWaveHermite(
   return (((a * f) - b_neg) * f + c) * f + x0;
 }
 
-}  // namespace plaits
+}
 
 #endif  // TIDES2_MODULATORS_ENGINE_WAVETABLE_ENGINE_H_
