@@ -91,6 +91,8 @@ bool Settings::Init() {
     CONSTRAIN(state_.range, 0, 2);
     CONSTRAIN(state_.output_mode, 0, 3);
     CONSTRAIN(state_.alt_mode, 0, 1);
+    CONSTRAIN(state_.frequency_locked, 0, 1);
+    CONSTRAIN(state_.frequency_lock_mode, 0, 2);
   }
   
   return success;

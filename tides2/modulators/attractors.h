@@ -1,3 +1,6 @@
+#ifndef TIDES2_MODULATORS_ATTRACTORS_H_
+#define TIDES2_MODULATORS_ATTRACTORS_H_
+
 #include "stmlib/stmlib.h"
 #include "stmlib/dsp/dsp.h"
 #include "tides2/resources.h"
@@ -300,4 +303,10 @@ class Attractors {
     }
 };
 
-}
+}  // namespace tides
+
+#undef DS_DXDT
+#undef DS_DYDT
+#undef DS_DZDT
+
+#endif  // TIDES2_MODULATORS_ATTRACTORS_H_

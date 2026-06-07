@@ -212,7 +212,7 @@ void Ui::OnSwitchReleased(const Event& e) {
         cv_reader_->SetFrequencyLocked(!cv_reader_->frequency_locked());
       }
     } else if (e.control_id == SWITCH_MODE) {
-      // Locked: resetttle
+      // Locked: resettle
       // Unlocked: restore
       if (!cv_reader_->clock_patched()) {
         if (cv_reader_->frequency_locked()) {
