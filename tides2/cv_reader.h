@@ -30,6 +30,7 @@
 #define TIDES_CV_READER_H_
 
 #include "stmlib/stmlib.h"
+#include "stmlib/dsp/hysteresis_quantizer.h"
 
 #include "tides2/drivers/cv_adc.h"
 #include "tides2/drivers/pots_adc.h"
@@ -53,7 +54,23 @@ class CvReader {
   inline bool fm_cv_thresholded() const {
     return cv_adc_.float_value(CV_ADC_CHANNEL_FM) < -0.17f;
   }
+
+  void    SetFrequencyLocked(bool locked);
+  void    RestoreFrequencyLock();
+  void    RecaptureFrequencyLock();
+  void    SetLockMode(uint8_t mode);
+  bool    frequency_locked()        const { return frequency_locked_; }
+  bool    clock_patched()           const { return clock_patched_; }
+  bool    lock_active()             const { return frequency_locked_ && !clock_patched_; }
+  float   locked_anchor_semitones() const { return locked_note_semitones_; }
+  uint8_t lock_mode()               const { return lock_mode_; }
   
+  inline float LockCenterHalfWidth() const {
+    // Half-width mode 0:25 1,2:9 plus a small margin so pickup engages
+    const float half = lock_mode_ == 0 ? (0.5f / 24.0f) : (0.5f / 8.0f);
+    return half + 0.005f;
+  }
+
   inline float CenterDetent(float x) const {
     if (x < 0.49f) {
       x *= 1.02040816f;
@@ -71,8 +88,19 @@ class CvReader {
   CvAdc cv_adc_;
   PotsAdc pots_adc_;
   float note_lp_;
-  
+  float alt_note_lp_;
+  bool  frequency_locked_;
+  bool  clock_patched_;             // last observed CLOCK gate patched state
+  float locked_note_semitones_;
+  float previous_pot_value_;
+  uint8_t lock_mode_;               // 0=semitones, 1=fifths+oct, 2=octaves
+  int8_t  last_locked_semitone_offset_;
+  bool    pickup_engaged_;
+  bool    pickup_disengage_side_;
+  stmlib::HysteresisQuantizer octave_quantizer_;
+
   CvReaderChannel cv_reader_channel_[kNumParameters];
+  CvReaderChannel alt_note_channel_;
   
   DISALLOW_COPY_AND_ASSIGN(CvReader);
 };

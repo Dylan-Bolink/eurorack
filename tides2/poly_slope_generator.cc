@@ -28,10 +28,33 @@
 
 #include "tides2/poly_slope_generator.h"
 
+#include <cmath>
+
 namespace tides {
-  
+
 /* static */
-Ratio PolySlopeGenerator::audio_ratio_table_[21][PolySlopeGenerator::num_channels] = {
+float PolySlopeGenerator::AsymmetricFold(float unipolar, float fold_amount) {
+  float bipolar = 2.0f * unipolar - 1.0f;
+  if (fold_amount <= 0.0f) return 5.0f * bipolar;
+  float saturated;
+  if (bipolar >= 0.0f) {
+    saturated = stmlib::Interpolate(
+        lut_asym_pos_fold, bipolar * fold_amount, 1024.0f);
+  } else {
+    saturated = -stmlib::Interpolate(
+        lut_asym_neg_fold, -bipolar * fold_amount, 1024.0f);
+  }
+  float x = saturated * (1.0f + fold_amount * 7.0f);
+  float t = (x - 1.0f) * 0.25f;
+  int32_t ti = static_cast<int32_t>(t);
+  if (t < static_cast<float>(ti)) ti--;
+  float m = t - static_cast<float>(ti);
+  float wrapped = fabsf(m * 4.0f - 2.0f) - 1.0f;
+  return 5.0f * (bipolar + (wrapped - bipolar) * fold_amount);
+}
+
+/* static */
+const Ratio PolySlopeGenerator::audio_ratio_table_[21][PolySlopeGenerator::num_channels] = {
   { { 1.0f, 1 }, { 0.5f, 2 }, { 0.25f, 4 }, { 0.125f, 8 } },
   { { 1.0f, 1 }, { 0.5f, 2 }, { 0.33333333f, 3 }, { 0.2f, 5 } },
   { { 1.0f, 1 }, { 0.5f, 2 }, { 0.33333333f, 3 }, { 0.25f, 4 } },
@@ -58,7 +81,7 @@ Ratio PolySlopeGenerator::audio_ratio_table_[21][PolySlopeGenerator::num_channel
 };
 
 /* static */
-Ratio PolySlopeGenerator::control_ratio_table_[21][PolySlopeGenerator::num_channels] = {
+const Ratio PolySlopeGenerator::control_ratio_table_[21][PolySlopeGenerator::num_channels] = {
   { { 1.0f, 1 }, { 0.5f, 2 }, { 0.25f, 4 }, { 0.125f, 8 } },
   { { 1.0f, 1 }, { 0.5f, 2 }, { 0.33333333f, 3 }, { 0.2f, 5 } },
   { { 1.0f, 1 }, { 0.5f, 2 }, { 0.33333333f, 3 }, { 0.25f, 4 } },

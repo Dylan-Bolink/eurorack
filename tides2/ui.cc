@@ -49,14 +49,15 @@ const LedColor Ui::palette_[4] = {
   LED_COLOR_OFF
 };
 
-void Ui::Init(Settings* settings, FactoryTest* factory_test) {
+void Ui::Init(Settings* settings, FactoryTest* factory_test, CvReader* cv_reader) {
   leds_.Init();
   switches_.Init();
-  
+
   system_clock.Init();
-  
+
   settings_ = settings;
   factory_test_ = factory_test;
+  cv_reader_ = cv_reader;
   mode_ = UI_MODE_NORMAL;
   
   if (switches_.pressed_immediate(SWITCH_SHIFT)) {
@@ -73,6 +74,7 @@ void Ui::Init(Settings* settings, FactoryTest* factory_test) {
   
   fill(&press_time_[0], &press_time_[SWITCH_LAST], 0);
   fill(&ignore_release_[0], &ignore_release_[SWITCH_LAST], false);
+  mode_led_flashing_ = false;
 }
 
 void Ui::Poll() {
@@ -136,9 +138,40 @@ void Ui::UpdateLEDs() {
         const State& s = settings_->state();
         bool color_blind = s.color_blind == 1;
         
-        leds_.set(LED_MODE, MakeColor(s.mode, color_blind));
-        leds_.set(LED_RANGE, MakeColor(s.range, color_blind));
-        leds_.set(LED_SHIFT, MakeColor((s.output_mode + 3) % 4, color_blind));
+        LedColor mode_color = MakeColor(s.mode, color_blind);
+        if (mode_led_flashing_) {
+          uint32_t elapsed = system_clock.milliseconds() - mode_led_flash_start_ms_;
+          if (elapsed < 300) {
+            mode_color = MakeColor(elapsed / 100, color_blind);
+          } else {
+            mode_led_flashing_ = false;
+          }
+        }
+        leds_.set(LED_MODE, mode_color);
+        if (cv_reader_->lock_active()) {
+          uint8_t pwm = system_clock.milliseconds() & 15;
+          uint8_t tri = (system_clock.milliseconds() >> 4) & 31;
+          tri = tri < 16 ? tri : 31 - tri;
+          leds_.set(LED_RANGE, pwm < tri ? MakeColor(cv_reader_->lock_mode(), color_blind) : LED_COLOR_OFF);
+        } else {
+          leds_.set(LED_RANGE, MakeColor(s.range, color_blind));
+        }
+        if (s.alt_mode) {
+          LedColor output_color = MakeColor((s.output_mode + 3) % 4, color_blind);
+          uint8_t pwm = system_clock.milliseconds() & 15;
+          uint8_t tri = (system_clock.milliseconds() >> 4) & 31;
+          tri = tri < 16 ? tri : 31 - tri;
+          if (output_color == LED_COLOR_OFF) {
+            // No mode color — breathe green and red alternately.
+            LedColor base_color = ((system_clock.milliseconds() / 512) & 1)
+                ? LED_COLOR_RED : LED_COLOR_GREEN;
+            leds_.set(LED_SHIFT, pwm < tri ? base_color : LED_COLOR_OFF);
+          } else {
+            leds_.set(LED_SHIFT, pwm < tri ? output_color : LED_COLOR_OFF);
+          }
+        } else {
+          leds_.set(LED_SHIFT, MakeColor((s.output_mode + 3) % 4, color_blind));
+        }
       }
       break;
       
@@ -173,6 +206,26 @@ void Ui::OnSwitchReleased(const Event& e) {
       mode_ = UI_MODE_CALIBRATION_C1;
       factory_test_->Calibrate(0, 1.0f, 3.0f);
       ignore_release_[SWITCH_RANGE] = ignore_release_[SWITCH_SHIFT] = true;
+    } else if (e.control_id == SWITCH_RANGE) {
+      // Lock controls are inert while a clock is patched (clocked mode wins).
+      if (!cv_reader_->clock_patched()) {
+        cv_reader_->SetFrequencyLocked(!cv_reader_->frequency_locked());
+      }
+    } else if (e.control_id == SWITCH_MODE) {
+      // Locked: resettle
+      // Unlocked: restore
+      if (!cv_reader_->clock_patched()) {
+        if (cv_reader_->frequency_locked()) {
+          cv_reader_->RecaptureFrequencyLock();
+        } else {
+          cv_reader_->RestoreFrequencyLock();
+        }
+        mode_led_flash_start_ms_ = system_clock.milliseconds();
+        mode_led_flashing_ = true;
+      }
+    } else if (e.control_id == SWITCH_SHIFT) {
+      State* s = settings_->mutable_state();
+      s->alt_mode = s->alt_mode ? 0 : 1;
     }
   } else if (mode_ == UI_MODE_CALIBRATION_C1) {
     factory_test_->Calibrate(1, 1.0f, 3.0f);
@@ -181,10 +234,19 @@ void Ui::OnSwitchReleased(const Event& e) {
     factory_test_->Calibrate(2, 1.0f, 3.0f);
     mode_ = UI_MODE_NORMAL;
   } else {
+    // When locked, range button cycles transpose mode instead of frequency range.
+    // No SaveState() here — transpose mode is synced on the next regular save.
+    if (cv_reader_->lock_active() && e.control_id == SWITCH_RANGE) {
+      cv_reader_->SetLockMode((cv_reader_->lock_mode() + 1) % 3);
+      return;
+    }
     State* s = settings_->mutable_state();
+    s->frequency_locked = cv_reader_->frequency_locked() ? 1 : 0;
+    s->set_locked_frequency(cv_reader_->locked_anchor_semitones());
+    s->set_lock_mode(cv_reader_->lock_mode());
     switch (e.control_id) {
       case SWITCH_MODE:
-        s->mode = (s->mode + 1) % 3;
+        s->mode = (s->mode + 1) % 4;
         break;
       case SWITCH_RANGE:
         s->range = (s->range + 1) % 3;

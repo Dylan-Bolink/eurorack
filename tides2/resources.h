@@ -49,6 +49,8 @@ extern const int16_t* lookup_table_i16_table[];
 extern const float lut_sine[];
 extern const float lut_bipolar_fold[];
 extern const float lut_unipolar_fold[];
+extern const float lut_asym_pos_fold[];
+extern const float lut_asym_neg_fold[];
 extern const int16_t lut_wavetable[];
 #define LUT_SINE 0
 #define LUT_SINE_SIZE 1281
@@ -56,6 +58,10 @@ extern const int16_t lut_wavetable[];
 #define LUT_BIPOLAR_FOLD_SIZE 1028
 #define LUT_UNIPOLAR_FOLD 2
 #define LUT_UNIPOLAR_FOLD_SIZE 1028
+#define LUT_ASYM_POS_FOLD 3
+#define LUT_ASYM_POS_FOLD_SIZE 1028
+#define LUT_ASYM_NEG_FOLD 4
+#define LUT_ASYM_NEG_FOLD_SIZE 1028
 #define LUT_WAVETABLE 0
 #define LUT_WAVETABLE_SIZE 12300
 

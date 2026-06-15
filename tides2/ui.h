@@ -36,6 +36,7 @@
 #include "tides2/drivers/leds.h"
 #include "tides2/drivers/switches.h"
 
+#include "tides2/cv_reader.h"
 #include "tides2/settings.h"
 
 namespace tides {
@@ -54,7 +55,7 @@ class Ui {
   Ui() { }
   ~Ui() { }
   
-  void Init(Settings* settings, FactoryTest* factory_test);
+  void Init(Settings* settings, FactoryTest* factory_test, CvReader* cv_reader);
   void Poll();
   void DoEvents();
   
@@ -76,10 +77,13 @@ class Ui {
   Switches switches_;
   uint32_t press_time_[SWITCH_LAST];
   bool ignore_release_[SWITCH_LAST];
+  uint32_t mode_led_flash_start_ms_;
+  bool     mode_led_flashing_;
   
   Settings* settings_;
   FactoryTest* factory_test_;
-  
+  CvReader* cv_reader_;
+
   UiMode mode_;
 
   static const LedColor palette_[4];

@@ -130,3 +130,24 @@ window = numpy.exp(-x * x * 4) ** 2
 unipolar_fold = (0.38 * sine + 4 * x) * window + numpy.arctan(4 * x) * (1 - window)
 unipolar_fold /= numpy.abs(unipolar_fold).max()
 lookup_tables.append(('unipolar_fold', unipolar_fold))
+
+# Asymmetric fold curves for OUTPUT_MODE_AMPLITUDE + alt_mode_.
+# Positive and negative excursions go through different tanh-shaped curves,
+# adding even harmonics ("warm/tube" character). Both LUTs are unipolar,
+# indexed [0, 1], with the engine picking by sign of the bipolar input.
+
+# Positive side: softer, tube-like saturation with mild 2nd-harmonic flavor.
+x = numpy.arange(0, WAVESHAPER_SIZE + 4) / float(WAVESHAPER_SIZE)
+x[-1] = x[-2]
+asym_pos = numpy.tanh(2.0 * x) / numpy.tanh(2.0)
+asym_pos = asym_pos + 0.12 * numpy.sin(2 * numpy.pi * x) * x
+asym_pos /= numpy.abs(asym_pos).max()
+lookup_tables.append(('asym_pos_fold', asym_pos))
+
+# Negative side: harder, clipping-like saturation with subtle fold.
+x = numpy.arange(0, WAVESHAPER_SIZE + 4) / float(WAVESHAPER_SIZE)
+x[-1] = x[-2]
+asym_neg = numpy.tanh(4.0 * x) / numpy.tanh(4.0)
+asym_neg = asym_neg - 0.15 * numpy.sin(3 * numpy.pi * x) * x
+asym_neg /= numpy.abs(asym_neg).max()
+lookup_tables.append(('asym_neg_fold', asym_neg))

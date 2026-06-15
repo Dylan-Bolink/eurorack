@@ -39,12 +39,12 @@ UPLOAD_COMMAND  = upload_combo_jtag_erase_first
 TARGET         = tides2
 PACKAGES       = tides2 \
 		tides2/ramp \
+		tides2/modulators \
 		tides2/drivers \
 		stmlib/dsp \
 		stmlib/utils \
 		stmlib/system
 RESOURCES      = tides2/resources
-
 TOOLCHAIN_PATH ?= /usr/local/arm-4.8.3/
 
 include stmlib/makefile.inc

@@ -68,6 +68,7 @@ bool Settings::Init() {
   state_.mode = 1;
   state_.range = 2;
   state_.output_mode = 0;
+  state_.alt_mode = 0;
   
   bool success = chunk_storage_.Init(&persistent_data_, &state_);
   
@@ -86,9 +87,12 @@ bool Settings::Init() {
       FIX_OUTLIER(persistent_data_.dac_calibration[i].scale, -4032.9f);
       FIX_OUTLIER(persistent_data_.dac_calibration[i].offset, 32768.0f);
     }
-    CONSTRAIN(state_.mode, 0, 2);
+    CONSTRAIN(state_.mode, 0, 3);
     CONSTRAIN(state_.range, 0, 2);
     CONSTRAIN(state_.output_mode, 0, 3);
+    CONSTRAIN(state_.alt_mode, 0, 1);
+    CONSTRAIN(state_.frequency_locked, 0, 1);
+    CONSTRAIN(state_.frequency_lock_mode, 0, 2);
   }
   
   return success;

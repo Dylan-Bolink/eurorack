@@ -45,34 +45,143 @@ void CvReader::Init(Settings* settings) {
   for (int i = 0; i < 6; ++i) {
     cv_reader_channel_[i].Init();
   }
-  
+  alt_note_channel_.Init();
+
   note_lp_ = 0.0f;
+  alt_note_lp_ = 0.0f;
+
+  const State& s = settings_->state();
+  frequency_locked_       = s.frequency_locked != 0;
+  clock_patched_          = false;
+  lock_mode_              = s.get_lock_mode() % 3;
+  locked_note_semitones_  = s.get_locked_frequency();
+  CONSTRAIN(locked_note_semitones_, -96.0f, 96.0f);
+  previous_pot_value_     = 0.5f;
+  last_locked_semitone_offset_ = 0;
+  pickup_engaged_         = false;
+  pickup_disengage_side_  = false;
 }
 
 float kShapeBreakpoints[] = {
   0.0f, 0.26f, 0.34f, 0.42f, 0.5f, 0.58f, 0.66f, 0.74f, 1.0f, 1.0f
 };
 
+void CvReader::SetFrequencyLocked(bool locked) {
+  if (locked && !frequency_locked_) {
+    locked_note_semitones_ = CenterDetent(previous_pot_value_) * 96.0f - 48.0f;
+    CONSTRAIN(locked_note_semitones_, -96.0f, 96.0f);
+    pickup_engaged_ = false;
+    pickup_disengage_side_ = (previous_pot_value_ >= 0.5f);
+    octave_quantizer_.Init();
+  }
+  frequency_locked_ = locked;
+}
+
+void CvReader::RestoreFrequencyLock() {
+  if (!frequency_locked_) {
+    pickup_engaged_ = false;
+    pickup_disengage_side_ = (previous_pot_value_ >= 0.5f);
+    octave_quantizer_.Init();
+    frequency_locked_ = true;
+  }
+}
+
+void CvReader::RecaptureFrequencyLock() {
+  // disengage the pot until it crosses center. Caller guards clock_patched_.
+  if (!frequency_locked_) return;
+  if (fabsf(previous_pot_value_ - 0.5f) < LockCenterHalfWidth()) return;  // inside center step: nothing to promote
+  locked_note_semitones_ += last_locked_semitone_offset_;
+  CONSTRAIN(locked_note_semitones_, -96.0f, 96.0f);
+  pickup_engaged_ = false;
+  pickup_disengage_side_ = (previous_pot_value_ >= 0.5f);
+  octave_quantizer_.Init();
+}
+
+void CvReader::SetLockMode(uint8_t mode) {
+  lock_mode_ = mode % 3;
+  octave_quantizer_.Init();  // reset hysteresis for fresh start in new mode
+}
+
 void CvReader::Read(IOBuffer::Block* block) {
   // Note.
-  float note = cv_reader_channel_[0].Process<true, false>(
-      CenterDetent(pots_adc_.float_value(POTS_ADC_CHANNEL_POT_FREQUENCY)),
-      96.0f,
-      -48.0f,
-      0.003f,
-  
-      cv_adc_.float_value(CV_ADC_CHANNEL_V_OCT),
-      settings_->adc_calibration_data(0).scale,
-      settings_->adc_calibration_data(0).offset,
-      0.2f,
-  
-      1.0f,
-  
-      -96.0f,
-      +96.0f);
+  float raw_pot = pots_adc_.float_value(POTS_ADC_CHANNEL_POT_FREQUENCY);
+  previous_pot_value_ = raw_pot;
+  clock_patched_ = block->input_patched[1];
 
-  ONE_POLE(note_lp_, note, 0.2f);
-  block->parameters.frequency = note_lp_; 
+  float note;
+  if (frequency_locked_ && !block->input_patched[1]) {
+    // fix for audible jumps when locking frequency
+    if (!pickup_engaged_) {
+      float half = LockCenterHalfWidth();
+      bool crossed = pickup_disengage_side_
+          ? (raw_pot <= 0.5f + half)
+          : (raw_pot >= 0.5f - half);
+      if (crossed) {
+        pickup_engaged_ = true;
+        octave_quantizer_.Init();
+      }
+    }
+
+    int semitone_offset = 0;
+    if (pickup_engaged_) {
+      float normalized = raw_pot;
+      if (fabsf(normalized - 0.5f) < LockCenterHalfWidth()) normalized = 0.5f;  // snap inside center step
+      CONSTRAIN(normalized, 0.0f, 1.0f);
+
+      if (lock_mode_ == 0) {
+        // Semitones: 25 steps, ±12 semitones (±1 octave)
+        int step = octave_quantizer_.Process(normalized, 25, 0.25f);
+        semitone_offset = step - 12;
+      } else if (lock_mode_ == 1) {
+        // Fifths + octaves: 9 snap points across ±2 octaves
+        static const int kFifths[9] = {-24, -19, -12, -7, 0, 7, 12, 19, 24};
+        int step = octave_quantizer_.Process(normalized, 9, 0.25f);
+        semitone_offset = kFifths[step];
+      } else {
+        // Octaves: 9 steps, ±4 octaves
+        int step = octave_quantizer_.Process(normalized, 9, 0.25f);
+        semitone_offset = (step - 4) * 12;
+      }
+    }
+    last_locked_semitone_offset_ = static_cast<int8_t>(semitone_offset);
+
+    float target_semitones = locked_note_semitones_ + semitone_offset;
+    CONSTRAIN(target_semitones, -96.0f, 96.0f);
+    float target_pot = (target_semitones + 48.0f) / 96.0f;
+
+    // Run through the same channel as unlocked — CV path is completely unchanged.
+    // pot_lp_coefficient=1.0f makes the pot contribution instant (no slew).
+    note = cv_reader_channel_[0].Process<true, false>(
+        target_pot,
+        96.0f,
+        -48.0f,
+        1.0f,
+        cv_adc_.float_value(CV_ADC_CHANNEL_V_OCT),
+        settings_->adc_calibration_data(0).scale,
+        settings_->adc_calibration_data(0).offset,
+        0.2f,
+        1.0f,
+        -96.0f,
+        +96.0f);
+    // Bypass note_lp_ so octave jumps are instant; keep it in sync for unlocking.
+    note_lp_ = note;
+    block->parameters.frequency = note;
+  } else {
+    note = cv_reader_channel_[0].Process<true, false>(
+        CenterDetent(raw_pot),
+        96.0f,
+        -48.0f,
+        0.003f,
+        cv_adc_.float_value(CV_ADC_CHANNEL_V_OCT),
+        settings_->adc_calibration_data(0).scale,
+        settings_->adc_calibration_data(0).offset,
+        0.2f,
+        1.0f,
+        -96.0f,
+        +96.0f);
+    ONE_POLE(note_lp_, note, 0.2f);
+    block->parameters.frequency = note_lp_;
+  } 
 
   // FM
   block->parameters.fm = cv_reader_channel_[1].Process<false, true>(
@@ -128,6 +237,24 @@ void CvReader::Read(IOBuffer::Block* block) {
         1.0f);
   }
   
+  float alt_note = alt_note_channel_.Process<true, true>(
+      CenterDetent(pots_adc_.float_value(POTS_ADC_CHANNEL_POT_SHAPE)),
+      96.0f,
+      -48.0f,
+      0.003f,
+  
+      cv_adc_.float_value(CV_ADC_CHANNEL_SHAPE),
+      settings_->adc_calibration_data(2).scale,
+      settings_->adc_calibration_data(2).offset,
+      0.2f,
+  
+      pots_adc_.float_value(PotsAdcChannel(POTS_ADC_CHANNEL_ATTENUVERTER_SHAPE)),
+  
+      -96.0f,
+      +96.0f);
+  ONE_POLE(alt_note_lp_, alt_note, 0.2f);
+  block->parameters.alt_frequency = alt_note_lp_; 
+
   cv_adc_.Convert();
   pots_adc_.Convert();
 }
