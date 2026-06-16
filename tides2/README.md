@@ -148,7 +148,7 @@ A driver oscillator excites a Serge style envelope generator (formant envelope).
 | **Frequency** | Driver frequency |
 | **Shape** | Shape of formant envelope |
 | **Slope** | AD balance control of the formant envelope |
-| **Smoothness** | Filtering/wavefolding the formant envelope |
+| **Smoothness** | Low-pass/wavefolder |
 | **Shift** | Formant frequency ratio (+-48 semitones) |
 
 | Output | Function |
@@ -181,7 +181,7 @@ A 3D wave terrain synthesizer. Three knobs navigate a grid of wavetables.
 |------|----------|
 | **Shape** | Bank |
 | **Slope** | X axis |
-| **Smoothness** | Low-pass filtering |
+| **Smoothness** | Low-pass/wavefolder |
 | **Shift** | Y axis |
 
 Through shape we interpolate through the following wavebanks:
