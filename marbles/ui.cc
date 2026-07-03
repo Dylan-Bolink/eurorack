@@ -216,8 +216,20 @@ void Ui::Poll() {
 }
 
 /* static */
+bool Ui::FadeGate(uint32_t period_ms) {
+  // Software-PWM fade gate: returns the instantaneous on/off bit for a soft
+  // triangle fade in/out over period_ms, replacing a hard square blink.
+  // Mirrors the dithering already used in DejaVuColor().
+  uint32_t phase = system_clock.milliseconds() % period_ms;
+  int tri = (phase << 5) / period_ms;         // 0..31 ramp
+  tri = tri < 16 ? tri : 31 - tri;            // 0..15..0 triangle
+  int pw = system_clock.milliseconds() & 15;  // 16-step PWM counter
+  return tri >= pw;
+}
+
+/* static */
 LedColor Ui::MakeColor(uint8_t value, bool color_blind) {
-  bool slow_blink = (system_clock.milliseconds() & 255) > 128;
+  bool slow_blink = FadeGate(256);
 
   uint8_t bank = value >= 3 ? 1 : 0;
   value -= bank * 3;
@@ -266,8 +278,8 @@ LedColor Ui::DejaVuColor(DejaVuState state, bool lock) {
 
 void Ui::UpdateLEDs() {
   bool blink = (system_clock.milliseconds() & 127) > 64;
-  bool slow_blink = (system_clock.milliseconds() & 255) > 128;
-  bool fast_blink = (system_clock.milliseconds() & 63) > 32;
+  bool slow_blink = FadeGate(256);
+  bool fast_blink = FadeGate(64);
   const State& state = settings_->state();
   bool cb = state.color_blind == 1;
   
@@ -312,7 +324,7 @@ void Ui::UpdateLEDs() {
         } else if (settings_->state().t_model == T_GENERATOR_MODEL_GRIDS &&
             switches_.pressed(SWITCH_X_MODE) && grids_held_first == SWITCH_X_MODE) {
 
-          bool fast_blink = (system_clock.milliseconds() & 127) > 64;
+          bool fast_blink = FadeGate(128);
 
           // Map X: off=off, 1=green (steps), 2=yellow (t_bias)
           LedColor x_color = LED_COLOR_OFF;
@@ -334,11 +346,17 @@ void Ui::UpdateLEDs() {
 
           // T mode LED: bank color + interpolation blink
           {
-            LedColor bank_colors[] = { LED_COLOR_GREEN, LED_COLOR_YELLOW, LED_COLOR_RED };
-            LedColor bank_color = bank_colors[state.grids_bank];
-            bool interp_blink = !state.grids_interpolation && slow_blink;
-            leds_.set(LED_T_MODEL, state.grids_interpolation ? bank_color
-                : (interp_blink ? bank_color : LED_COLOR_OFF));
+            if (state.grids_bank == 3) {
+              // Division bank: green<->red alternation, distinct from all 6 other states.
+              bool alt = (system_clock.milliseconds() & 511) < 256;
+              leds_.set(LED_T_MODEL, alt ? LED_COLOR_GREEN : LED_COLOR_RED);
+            } else {
+              LedColor bank_colors[] = { LED_COLOR_GREEN, LED_COLOR_YELLOW, LED_COLOR_RED };
+              LedColor bank_color = bank_colors[state.grids_bank];
+              bool interp_blink = !state.grids_interpolation && slow_blink;
+              leds_.set(LED_T_MODEL, state.grids_interpolation ? bank_color
+                  : (interp_blink ? bank_color : LED_COLOR_OFF));
+            }
           }
 
           // T deja vu lock CV swap
@@ -545,10 +563,17 @@ void Ui::OnSwitchReleased(const Event& e) {
     bool is_grids = state->t_model >= T_GENERATOR_MODEL_GRIDS;
     if (!is_grids || grids_held_first == SWITCH_X_MODE) {
       ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_MODE] = true;
-      uint8_t combined = state->grids_bank + (state->grids_interpolation ? 0 : 3);
-      combined = (combined + 1) % 6;
-      state->grids_bank = combined % 3;
-      state->grids_interpolation = (combined < 3) ? 1 : 0;
+      uint8_t combined = state->grids_bank == 3
+          ? 6
+          : state->grids_bank + (state->grids_interpolation ? 0 : 3);
+      combined = (combined + 1) % 7;
+      if (combined == 6) {
+        state->grids_bank = 3;
+        state->grids_interpolation = 1;        // bank 3 always smooth
+      } else {
+        state->grids_bank = combined % 3;
+        state->grids_interpolation = (combined < 3) ? 1 : 0;
+      }
       grids_save_flag_ = true;
       return;
     }

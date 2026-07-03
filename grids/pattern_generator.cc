@@ -62,12 +62,33 @@ void PatternGenerator::Init() {
   henri_ = false;
 }
 
+// Bank 3 step weight. Density (applied downstream as a threshold) reveals steps
+// in weight order, so this defines the rhythm. Equal weights within a metric
+// tier give the clean 1,2,4,8,16,32 division progression.
+static inline uint8_t DivisionWeight(uint8_t step) {
+  uint8_t tier;                                  // metric strength, 0 = strongest
+  if (step == 0)            tier = 0;            // downbeat        -> 1/32
+  else if (step % 16 == 0)  tier = 1;            // half            -> 2/32
+  else if (step % 8 == 0)   tier = 2;            // quarters        -> 4/32
+  else if (step % 4 == 0)   tier = 3;            // eighths         -> 8/32
+  else if (step % 2 == 0)   tier = 4;            // sixteenths      -> 16/32
+  else                      tier = 5;            // off-grid 32nds  -> 32/32
+  return 255 - tier * 40;                        // 255,215,175,135,95,55
+}
+
 uint8_t PatternGenerator::ReadDrumMap(
     uint8_t step,
     uint8_t instrument,
     uint8_t x,
     uint8_t y) {
   uint8_t i, j;
+
+  if (bank_ == 3) {
+    uint8_t rot = ((static_cast<uint16_t>(x) * 16) >> 8)              // Map X: global 0..15
+                + instrument * ((static_cast<uint16_t>(y) * 8) >> 8); // Map Y: per-channel spread
+    uint8_t s = (step + 32 - rot) & 31;                              // rotate within the 32-step bar
+    return DivisionWeight(s);
+  }
 
   if (henri_) {
     i = static_cast<uint8_t>(static_cast<uint16_t>(x) * 3 / 255);

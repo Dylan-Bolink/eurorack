@@ -68,7 +68,7 @@ class PatternGenerator {
   OutputStep GetStep(uint8_t step, uint8_t x, uint8_t y);
   uint8_t ReadDrumMap(uint8_t step, uint8_t instrument, uint8_t x, uint8_t y);
 
-  void SetBank(uint8_t bank) { bank_ = bank < 3 ? bank : 2; }
+  void SetBank(uint8_t bank) { bank_ = bank < 4 ? bank : 3; }
   void SetHenri(bool henri) { henri_ = henri; }
 
  private:

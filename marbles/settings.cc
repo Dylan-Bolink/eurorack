@@ -235,7 +235,7 @@ void Settings::Init() {
     CONSTRAIN(state_.y_range, 0, 2);
     CONSTRAIN(state_.t_deja_vu, DEJA_VU_OFF, DEJA_VU_LOCKED);
     CONSTRAIN(state_.x_deja_vu, DEJA_VU_OFF, DEJA_VU_LOCKED);
-    CONSTRAIN(state_.grids_bank, 0, 2);
+    CONSTRAIN(state_.grids_bank, 0, 3);
     CONSTRAIN(state_.grids_interpolation, 0, 1);
     CONSTRAIN(state_.grids_henri, 0, 1);
     CONSTRAIN(state_.grids_accent_hang, 0, 1);

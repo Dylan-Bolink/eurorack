@@ -114,6 +114,7 @@ class Ui {
   void TerminateScaleRecording();
   static LedColor MakeColor(uint8_t value, bool color_blind);
   static LedColor DejaVuColor(DejaVuState state, bool lock);
+  static bool FadeGate(uint32_t period_ms);
   
   stmlib::EventQueue<16> queue_;
   
