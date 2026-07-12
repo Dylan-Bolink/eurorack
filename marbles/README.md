@@ -57,7 +57,7 @@ These features extend the standard Marbles functionality and are available outsi
 
 ### X Modes
 
-The **X Mode** button now has 5 modes split into two banks:
+The **X Mode** button now has 6 modes split into two banks:
 
 | Bank  | LED State | Name |
 |------|-----------|------|
@@ -66,6 +66,7 @@ The **X Mode** button now has 5 modes split into two banks:
 | Basic | Solid Red | Tilt |
 | Alternative | Blinking Green | Round Robin |
 | Alternative | Blinking Orange | Envelope |
+| Alternative | Blinking Red | Acid |
 
 > Short tap cycles within the current bank. Long press switches between banks.
 
@@ -90,15 +91,51 @@ Generates attack-decay envelopes on X outputs triggered by t1t2t3 or clock input
 | **Steps** | Attack/decay ratio |
 
 
-**X Range** changes retrigger behavior:
+**X Range** tap changes retrigger behavior (independent of the voltage range used in other modes):
 
 | LED State | Retrigger Mode |
 |-----------|----------------|
-| Green (narrow) | Hard reset on every trigger |
-| Orange (positive) | Only retrigger after attack phase (Serge-style) |
-| Red (full) | Only retrigger after envelope completes (legato) |
+| Green | Hard reset on every trigger |
+| Orange | Only retrigger after attack phase (Serge-style) |
+| Red | Only retrigger after envelope completes (legato) |
 
 > With external clock, envelopes trigger round-robin style (one channel per trigger). With internal clock, all channels trigger independently.
+
+> **Long-press X Range** still opens scale select (the scale quantizes the Y output). **X Ext** is disabled in envelope mode — External/Transpose have no meaning for envelope outputs, and your setting is kept for the other modes.
+
+<br>
+
+### Acid (Blinking red)
+
+A TB-303 style generative acid sequencer on the X section, following the pattern rules of the [TB-3PO](https://firmware.phazerville.com/TB-3PO) Hemisphere applet. The X trio becomes one voice:
+
+| Output | Function |
+|--------|----------|
+| **X1** | Pitch (1V/oct, quantized to the selected scale, with exponential 303 slides) |
+| **X2** | Gates — 3V normal notes, 5V accents, half-step length, tied through slides |
+| **X3** | Accent gate |
+
+Knob functions:
+
+| Control | Function |
+|---------|----------|
+| **Spread** | Pitch pool: root-only drone → half-steps → triad → full scale → ±1 octave jumps. Note repeats fade out as you turn up |
+| **Steps** | Gate density |
+| **Bias** | Slide/accent bias. Noon = authentic 303 (~18% slides, ~16% accents). CCW = more slides, CW = more accents |
+
+**X Range** short tap selects the **scale** — tap to step through the six scale presets plus a **chromatic** mode (LED off). The X Range LED shows the current scale (green/yellow/red + blinking for presets 4–6, off for chromatic).
+
+**Hold X Range** for a momentary **acid fill** — the line snaps back the instant you release, and the X-section LEDs flicker while it's active. Each hold picks one of three fills at random (never the same one twice in a row):
+
+| Fill | What it does |
+|------|--------------|
+| **Roll** | Every step gated, accents alternating — a driving, pumping 16th-note stutter |
+| **Octave run** | Frequent upward octave leaps, always new notes — the classic acid reach-up |
+| **Slide run** | Every step slides — a continuous gliding portamento worm |
+
+> All three fills force enough gate density to be heard, even with Steps turned way down.
+
+> One step per clock: external X clock when patched, otherwise the master T clock. In Grids mode the bassline runs at 16ths so a 16-step pattern aligns exactly with one 32-step drum bar.
 
 <br>
 
@@ -164,6 +201,17 @@ Long press **T Mode** while on drum mode (solid red) to enter Grids mode (blinki
 | **Jitter** | Snare density |
 
 > All three respond to CV input.
+
+### Drum Fill (hold T Range)
+
+**Hold T Range** in Grids mode to trigger a momentary drum fill; the pattern snaps back the instant you let go. A short **tap** still cycles the clock range as normal. Each hold picks one of three fills at random (never the same one twice in a row):
+
+| Fill | What it does |
+|------|--------------|
+| **Build** | Staged build-up over ~2 seconds of hold: hats densify first, snare joins mid-hold, kick and chaos arrive for the peak |
+| **Roll** | Snare hits every step (a true roll), kick/hats pulled back |
+| **Scatter** | Jumps to a random spot in the drum map, moderately busy — a different groove, not just "more" |
+
 
 ### Deja Vu (T Side)
 
@@ -381,3 +429,4 @@ While **Holding T Mode** the gate configuration parameters are still accessible.
 - This very handy grids [pattern website](https://goodtohear.co.uk/tools/grids-sequencer) by **Michael Forrest**
 - VCV Rack Topograph for all the A/B Testing by **Dale Johnson**
 - Henri mode based on Grids4Live by **Henri David**
+- Acid mode pattern rules from the [TB-3PO](https://firmware.phazerville.com/TB-3PO) Hemisphere applet by **Logarhythm**, maintained by **djphazer** (Phazerville Suite)

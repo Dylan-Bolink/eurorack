@@ -190,6 +190,8 @@ void Settings::Init() {
   state_.x_register_mode = 0;
   state_.x_range = 2;
   state_.x_scale = 0;
+  state_.x_envelope_retrigger = 0;
+  state_.settings_version = 1;
   
   state_.y_spread = 128;
   state_.y_bias = 128;
@@ -227,11 +229,20 @@ void Settings::Init() {
   freshly_baked_ = !chunk_storage_.Init(&persistent_data_, &state_);
   
   if (!freshly_baked_) {
+    if (state_.settings_version == 0) {
+      // Saved by Truchets <= 1.1, where the envelope retrigger mode lived
+      // in x_range; carry it over so envelope patches behave the same.
+      state_.x_envelope_retrigger = state_.x_range;
+      state_.settings_version = 1;
+    }
+    CONSTRAIN(state_.x_envelope_retrigger, 0, 2);
+    CONSTRAIN(state_.x_register_mode, 0, 2);
+    CONSTRAIN(state_.explicit_reset, 0, 3);  // indexes er_colors[4] in the UI
     CONSTRAIN(state_.t_model, 0, 5);
     CONSTRAIN(state_.t_range, 0, 2);
-    CONSTRAIN(state_.x_control_mode, 0, 4);
+    CONSTRAIN(state_.x_control_mode, 0, 5);
     CONSTRAIN(state_.x_range, 0, 2);
-    CONSTRAIN(state_.x_scale, 0, 5);
+    CONSTRAIN(state_.x_scale, 0, 6);
     CONSTRAIN(state_.y_range, 0, 2);
     CONSTRAIN(state_.t_deja_vu, DEJA_VU_OFF, DEJA_VU_LOCKED);
     CONSTRAIN(state_.x_deja_vu, DEJA_VU_OFF, DEJA_VU_LOCKED);
