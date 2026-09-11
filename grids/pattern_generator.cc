@@ -76,6 +76,18 @@ static inline uint8_t DivisionWeight(uint8_t step) {
   return 255 - tier * 40;                        // 255,215,175,135,95,55
 }
 
+// Bank 3, triplet side: the same reveal-by-threshold idea on a ternary grid
+// (quarter/8th/16th-note triplets approximated on the 32-step bar: thirds at
+// 0/11/21, sixths add 5/16/27, twelfths add 3/8/13/19/24/29). The straight
+// 16th positions fill in above the off-grid leftovers so high densities stay
+// busy rather than gapped.
+static const uint8_t kTripletWeight[32] = {
+  255,  55,  95, 135,  95, 175,  95,  55,   // 0: downbeat, 3/5: 12th/6th
+  135,  55,  95, 215,  95, 135,  95,  55,   // 11: triplet quarter
+  175,  55,  95, 135,  95, 215,  95,  55,   // 16: 6th, 21: triplet quarter
+  135,  55,  95, 175,  95, 135,  95,  55,   // 24: 12th, 27: 6th
+};
+
 uint8_t PatternGenerator::ReadDrumMap(
     uint8_t step,
     uint8_t instrument,
@@ -84,10 +96,13 @@ uint8_t PatternGenerator::ReadDrumMap(
   uint8_t i, j;
 
   if (bank_ == 3) {
-    uint8_t rot = ((static_cast<uint16_t>(x) * 16) >> 8)              // Map X: global 0..15
-                + instrument * ((static_cast<uint16_t>(y) * 8) >> 8); // Map Y: per-channel spread
-    uint8_t s = (step + 32 - rot) & 31;                              // rotate within the 32-step bar
-    return DivisionWeight(s);
+    // Map Y: per-channel rotation spreads the three dividers in phase
+    // (kick anchored). Map X morphs the metric grid itself — straight
+    // binary divisions at CCW crossfading into a triplet grid at CW —
+    // so every knob position changes the rhythm on every channel.
+    uint8_t rot = instrument * ((static_cast<uint16_t>(y) * 8) >> 8);
+    uint8_t s = (step + 32 - rot) & 31;
+    return U8Mix(DivisionWeight(s), kTripletWeight[s], x);
   }
 
   if (henri_) {

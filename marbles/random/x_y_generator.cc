@@ -41,6 +41,26 @@ namespace marbles {
 using namespace std;
 using namespace stmlib;
 
+namespace {
+
+// Acid gate length, as a fraction of the step. Accented steps hold slightly
+// longer -- the receiving voice's accent sweep charges only while the gate is
+// high -- but only slightly: the sweep is nearly saturated by mid-step, so a
+// wide split costs normal steps a lot of note length to buy well under a dB
+// of extra brightness.
+const float kAcidGateLength = 0.65f;
+const float kAcidAccentGateLength = 0.85f;
+
+// One-pole slide coefficient at the 32kHz block rate: ~21ms time constant,
+// which reads as roughly 60ms of glide.
+const float kAcidSlideCoefficient = 0.0015f;
+
+// X3 velocity levels, in volts. The normal step is the one that sets accent
+// contrast; see the note at the point of use before changing it.
+const float kAcidNormalLevel = 1.5f;
+const float kAcidAccentLevel = 5.0f;
+
+}  // namespace
 
 void XYGenerator::Init(RandomStream* random_stream, float sr) {
   for (size_t i = 0; i < kNumChannels; ++i) {
@@ -80,8 +100,11 @@ void XYGenerator::ResetAcidPhase() {
   acid_div_ = (acid_align_step_ & 1) ? 0 : 1;
   acid_gate_ = false;
   acid_accent_ = false;
+  acid_level_ = 0.0f;
   acid_slide_ = false;
   acid_prev_accent_ = false;
+  acid_accent_run_ = 0;
+  acid_gate_length_ = kAcidGateLength;
 }
 
 namespace {
@@ -544,19 +567,28 @@ void XYGenerator::Process(
           const bool gated = u_gate < gate_prob;
           const bool tie = acid_slide_;  // previous step slides into this one
 
-          // 303 rule: slides and accents are rarer twice in a row. The
+          // 303 rule: accents thin out in long runs, but pairs are left
+          // alone. An accent-sweep circuit charges while gates are high and
+          // bleeds off over ~250ms, so 2-4 accents in a row climb in
+          // brightness across the run -- that stacking is the sound, not a
+          // defect, and suppressing it at every repeat throws it away. The
           // suppression fades out as the knob approaches "always".
           float accent_suppression = 1.0f;
-          if (acid_prev_accent_) {
+          if (acid_accent_run_ >= 2) {
             accent_suppression = 0.45f + 0.55f * (accent_prob - 0.16f) / 0.84f;
           }
+          // A tied step never produces a gate edge, so a velocity voice has
+          // nothing to latch an accent on: the accent would only move X3
+          // mid-note, reading as a volume jump with no change in brightness.
+          // Accents belong on steps that actually retrigger.
           // Roll fill: alternate accents so the stutter pumps instead of
           // sitting at a constant 5V (all-accented = no dynamics at all).
-          const bool accent = roll_fill
-              ? (gated && !acid_prev_accent_)
-              : gated
-                  && Fraction(u_gate * 61.0f)
-                      < accent_prob * accent_suppression;
+          const bool accent = !tie
+              && (roll_fill
+                  ? (gated && !acid_prev_accent_)
+                  : gated
+                      && Fraction(u_gate * 61.0f)
+                          < accent_prob * accent_suppression);
           float slide_suppression = 1.0f;
           if (tie) {
             slide_suppression = 0.55f + 0.45f * (slide_prob - 0.18f) / 0.82f;
@@ -567,6 +599,9 @@ void XYGenerator::Process(
           acid_slide_ = gated
               && Fraction(u_mod * 61.0f) < slide_prob * slide_suppression;
           acid_prev_accent_ = accent;
+          acid_accent_run_ = accent
+              ? (acid_accent_run_ < 4 ? acid_accent_run_ + 1 : 4)
+              : 0;
 
           // New note, or repeat of the previous one. Notes live in a
           // root-centered octave; the quantizer's weight thresholds turn
@@ -604,10 +639,37 @@ void XYGenerator::Process(
           if (gated || tie) {
             acid_gate_ = true;
             acid_accent_ = accent;
+            // Per-step velocity for X3, flat across the note. 1V normal
+            // rather than 2V: a velocity voice compresses its level input
+            // (Plaits does 1.3L/(0.3+L)), which is already saturating well
+            // below 5V, so accent contrast is set almost entirely by the
+            // unaccented step -- 2V/5V is ~4dB, 1V/5V is ~9dB. Raising the
+            // accent instead buys almost nothing.
+            //
+            // 1.5V rather than 1.0V: 1.0V is the widest sensible contrast,
+            // but it lands normal notes at 0.37 of full level, where they
+            // read as weak rather than merely unaccented. 1.5V lifts them
+            // 2.4dB and still leaves a solid accent.
+            //
+            // A tie carries the sounding note's level through unchanged.
+            // The accent was sampled once at that note's gate edge, so
+            // moving X3 now would change loudness without changing timbre.
+            if (!tie) {
+              acid_level_ = accent ? kAcidAccentLevel : kAcidNormalLevel;
+            }
           } else {
             acid_gate_ = false;
             acid_accent_ = false;
+            acid_level_ = 0.0f;
           }
+          // Accent-sweep circuits charge only while the gate is high, with
+          // a time constant in the tens of ms, so gate length is a
+          // brightness control as well as a note length. Accented steps
+          // hold longer and pick up the extra sweep; normal steps stay
+          // short enough to stay articulated.
+          acid_gate_length_ = acid_level_ > kAcidNormalLevel
+              ? kAcidAccentGateLength
+              : kAcidGateLength;
         }
       }
 
@@ -618,16 +680,20 @@ void XYGenerator::Process(
         step_phase = acid_div_ == 1 ? 0.5f * ph : 0.5f + 0.5f * ph;
       }
 
-      // 303 gate timing: half the step, but a slid step holds its gate
-      // through the transition into the next one.
-      if (acid_gate_ && step_phase >= 0.5f && !acid_slide_) {
+      // 303 gate timing: a fraction of the step, but a slid step holds its
+      // gate through the transition into the next one.
+      if (acid_gate_ && step_phase >= acid_gate_length_ && !acid_slide_) {
         acid_gate_ = false;
         acid_accent_ = false;
       }
 
-      // Fixed-time exponential pitch slide.
+      // Fixed-time exponential pitch slide. One-pole with a ~21ms time
+      // constant at 32kHz, so a slide reads as about 60ms of glide -- the
+      // 303 figure. The voice deliberately has no slide of its own; a
+      // 303's portamento is the sequencer's job.
       if (acid_pitch_ != acid_slide_target_) {
-        acid_pitch_ += 0.003f * (acid_slide_target_ - acid_pitch_);
+        acid_pitch_ += kAcidSlideCoefficient
+            * (acid_slide_target_ - acid_pitch_);
         float remaining = acid_slide_target_ - acid_pitch_;
         if (remaining < 0.0001f && remaining > -0.0001f) {
           acid_pitch_ = acid_slide_target_;
@@ -636,13 +702,17 @@ void XYGenerator::Process(
 
       output[0 + s * kNumChannels] = acid_pitch_;
 
-      // X2: gates, 3V normal / 5V accent.
-      const float gate_level = acid_accent_ ? 5.0f : 3.0f;
-      output[1 + s * kNumChannels] = acid_gate_ ? gate_level : 0.0f;
+      // X2: clean 5V trigger on every gated step (accent now lives on X3).
+      output[1 + s * kNumChannels] = acid_gate_ ? 5.0f : 0.0f;
 
-      // X3: accent-only gate.
-      output[2 + s * kNumChannels] =
-          (acid_gate_ && acid_accent_) ? 5.0f : 0.0f;
+      // X3: per-step velocity — 0V rest, 1V normal, 5V accent — gated to
+      // the same length as X2. Pairs with X2 -> TRIG, X3 -> LEVEL on
+      // velocity voices: with a level CV patched, Plaits' low-pass gate
+      // tracks it continuously and its own DECAY stops setting note
+      // length, so X3's length *is* the note length and has to match the
+      // trigger's. The value itself is a hard step, never slewed -- the
+      // accent is sampled once, shortly after the trigger edge.
+      output[2 + s * kNumChannels] = acid_gate_ ? acid_level_ : 0.0f;
     }
   }
 

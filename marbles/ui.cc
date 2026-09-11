@@ -834,9 +834,14 @@ void Ui::OnSwitchReleased(const Event& e) {
           // In Grids a hold is a drum fill, so only a genuine tap cycles the
           // clock range. Outside Grids, any press cycles it (no fill there).
           bool grids = state->t_model >= T_GENERATOR_MODEL_GRIDS;
-          if (!grids || e.data < kFillTapTime) {
-            state->t_range = (state->t_range + 1) % 3;
+          if (grids && e.data >= kFillTapTime) {
+            // Releasing a fill changes nothing, so skip the flash write too:
+            // SaveState() burns a chunk on every call and eventually a
+            // blocking sector erase, and a fill is a performance gesture
+            // repeated dozens of times a set.
+            break;
           }
+          state->t_range = (state->t_range + 1) % 3;
         }
         SaveState();
       }
@@ -937,9 +942,12 @@ void Ui::OnSwitchReleased(const Event& e) {
         // Tap cycles the scale (index kNumScales = chromatic, LED off).
         // A longer hold is the fill (handled in the poll loop), so only a
         // genuine tap changes the scale.
-        if (mode_ == UI_MODE_NORMAL && e.data < kFillTapTime) {
-          state->x_scale = (state->x_scale + 1) % (kNumScales + 1);
+        if (mode_ != UI_MODE_NORMAL || e.data >= kFillTapTime) {
+          // Releasing a fill changes nothing; skip the flash write. See the
+          // note in SWITCH_T_RANGE.
+          break;
         }
+        state->x_scale = (state->x_scale + 1) % (kNumScales + 1);
       } else if (e.data >= kLongPressDuration) {
         if (mode_ == UI_MODE_NORMAL) {
           mode_ = UI_MODE_SELECT_SCALE;

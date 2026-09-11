@@ -14,12 +14,16 @@ When you need instructions on how to update your marbles go to the [**original m
 1. [Button Behavior](#button-behavior)
 2. [Marbles Enhancements](#marbles-enhancements)
    - [X Modes](#x-modes)
+   - [Round Robin](#round-robin-blinking-green)
+   - [Envelope](#envelope-blinking-orange)
+   - [Acid](#acid-blinking-red)
    - [X Ext Modes](#x-ext-modes)
    - [Explicit Reset](#explicit-reset)
 3. [Activating Grids Mode](#activating-grids-mode)
-4. [Outputs](#outputs)
+4. [Grids Mode Outputs](#grids-mode-outputs)
 5. [Standard Controls](#standard-controls)
    - [Density Knobs](#density-knobs)
+   - [Drum Fill](#drum-fill-hold-t-range)
    - [Deja Vu (T Side)](#deja-vu-t-side)
 6. [X Shift Layer - Knobs](#x-shift-layer---knobs)
    - [Groove Offset](#groove-offset-x-bias)
@@ -34,8 +38,9 @@ When you need instructions on how to update your marbles go to the [**original m
    - [CV Swap Routing](#cv-swap-routing)
    - [Deja Vu CV Swap](#deja-vu-cv-swap)
 8. [Advanced Settings Layer](#advanced-settings-layer)
-9. [Patching Ideas](#patching-ideas)
-10. [Credits](#credits)
+9. [Calibration](#calibration)
+10. [Patching Ideas](#patching-ideas)
+11. [Credits](#credits)
 
 <br>
 
@@ -111,9 +116,13 @@ A TB-303 style generative acid sequencer on the X section, following the pattern
 
 | Output | Function |
 |--------|----------|
-| **X1** | Pitch (1V/oct, quantized to the selected scale, with exponential 303 slides) |
-| **X2** | Gates — 3V normal notes, 5V accents, half-step length, tied through slides |
-| **X3** | Accent gate |
+| **X1** | Pitch (1V/oct, quantized to the selected scale, with ~60ms exponential 303 slides) |
+| **X2** | Trigger — clean 5V gate, tied through slides. 65% of the step, 85% on accents |
+| **X3** | Velocity — 0V rest, 1.5V normal note, 5V accent, flat across the note, same length as X2 |
+
+> **Driving [Plaits Palette](https://rubato.audio/plaits-palette/):** patch **X1 → V/Oct**, **X2 → TRIG**, **X3 → LEVEL**. The accent behaviour — the two velocity levels, the gate lengths, and the way accents and slides interact — is tuned around Palette's acid model, so normal steps sit soft and dark while accents hit loud and bright.
+>
+> One setting on the Plaits side: `level_cv_option` must be **0** ("cv control of level"), which is the factory default. At 1 or 2 the LEVEL input is rerouted to DECAY and accents silently stop responding.
 
 Knob functions:
 
@@ -122,6 +131,12 @@ Knob functions:
 | **Spread** | Pitch pool: root-only drone → half-steps → triad → full scale → ±1 octave jumps. Note repeats fade out as you turn up |
 | **Steps** | Gate density |
 | **Bias** | Slide/accent bias. Noon = authentic 303 (~18% slides, ~16% accents). CCW = more slides, CW = more accents |
+
+**X Deja Vu** locks the riff, exactly as it does in the other X modes. With it off the line regenerates forever; tap it and the pattern loops — same notes, gates, slides and accents every pass. **Deja Vu Length** sets the loop length, 1 to 16 steps. At 16 in Grids mode the riff lines up with one drum bar.
+
+> Pitch, gate/accent and slide each run on their own stream, so a locked riff repeats exactly rather than drifting one element at a time.
+
+> **X Ext** in acid toggles **Normal** and **Transpose** only — External has no meaning when the X trio is a single voice, so it is skipped. In Transpose, the Spread CV input shifts **X1 only**; the trigger and velocity outputs are left alone.
 
 **X Range** short tap selects the **scale** — tap to step through the six scale presets plus a **chromatic** mode (LED off). The X Range LED shows the current scale (green/yellow/red + blinking for presets 4–6, off for chromatic).
 
@@ -136,6 +151,8 @@ Knob functions:
 > All three fills force enough gate density to be heard, even with Steps turned way down.
 
 > One step per clock: external X clock when patched, otherwise the master T clock. In Grids mode the bassline runs at 16ths so a 16-step pattern aligns exactly with one 32-step drum bar.
+
+> Switching into acid while Grids is running snaps the riff to its first step at the top of the next drum bar, so it drops in on the downbeat instead of wherever the pattern happened to be. The drums keep playing untouched.
 
 <br>
 
@@ -185,6 +202,8 @@ Long press **T Mode** while on drum mode (solid red) to enter Grids mode (blinki
 | **X1/X2/X3** | Random voltages |
 
 > X1/X2/X3 are following the standard Marbles behaviour. All X controls still function like the original firmware. X2 follows hihat pattern instead of master tempo source.
+
+> In **acid mode** the X outputs are the bassline instead — pitch, trigger and velocity, see [Acid](#acid-blinking-red). The T side is unchanged, and the two run off the same clock so the line stays locked to the drums.
 
 <br>
 
@@ -275,6 +294,8 @@ Change the pattern coordinates on the current bank.
 
 > [Original Grids manual](https://pichenettes.github.io/mutable-instruments-documentation/modules/grids/manual/)
 
+> On the **Divisions bank** the two knobs work differently: **Map X** morphs the metric grid itself — straight binary divisions on the left, crossfading into a triplet grid on the right (quarter/8th/16th triplets), with hybrid grids in between. **Map Y** spreads the three channels apart in phase: the kick stays anchored, the snare shifts up to 7 steps, the hats twice that — turning parallel dividers into interlocking canons.
+
 ### Chaos (Spread)
 
 | Position | Effect |
@@ -331,6 +352,7 @@ Hold **X Mode** + tap **T Mode** to cycle through pattern banks:
 | Blinking Green | OG Grids (no interpolation) |
 | Blinking Orange | Electronic (no interpolation) |
 | Blinking Red | Breakbeat (no interpolation) |
+| Off | Divisions — each density knob is a clock divider (1 → 32 hits/bar); accents follow metric strength |
 
 > **Interpolation vs No Interpolation:** With interpolation (solid LED), patterns morph smoothly between the 25 positions in the 5x5 grid as you adjust Map X/Y (Same as the original Grids). Without interpolation (blinking LED), Map X/Y snap to the nearest of the 25 grid positions — no morphing, just the raw patterns.
 
@@ -408,6 +430,14 @@ Now supports 4 independent states for T and X sections. See [Explicit Reset](#ex
 While **Holding T Mode** the gate configuration parameters are still accessible. 
 > [Marbles manual about gate configuration](https://arc.net/l/quote/heojrdjx)
 
+
+<br>
+
+## Calibration
+
+Marbles' calibration gesture (**T Range** + **X Range**) is unchanged, but it is now blocked while the T side is in **Grids mode** or the X side is in **acid mode**. In both, those buttons are fill triggers, and holding them together mid-set was too easy a way to fall into calibration by accident.
+
+> To calibrate, leave Grids (long press **T Mode**) and take the X side out of acid, then press **T Range** + **X Range** as usual. Both mode settings survive a power cycle, so if the gesture seems dead, that is the first thing to check.
 
 <br>
 

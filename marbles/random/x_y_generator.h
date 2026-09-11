@@ -169,8 +169,11 @@ class XYGenerator {
   int acid_div_;            // half-time divider position (Grids mode)
   bool acid_gate_;
   bool acid_accent_;
+  float acid_level_;        // X3 per-step velocity (accent), flat per note
   bool acid_slide_;         // current step slides into the next one
   bool acid_prev_accent_;   // for the anti-consecutive 303 rules
+  uint8_t acid_accent_run_; // consecutive accents, so pairs survive
+  float acid_gate_length_;  // this step's gate length, as a phase fraction
   float acid_pitch_;        // slewed pitch output
   float acid_slide_target_;
   float acid_prev_target_;  // last computed note, for repeats
