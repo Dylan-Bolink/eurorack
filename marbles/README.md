@@ -14,16 +14,16 @@ When you need instructions on how to update your marbles go to the [**original m
 1. [Button Behavior](#button-behavior)
 2. [Marbles Enhancements](#marbles-enhancements)
    - [X Modes](#x-modes)
-   - [Round Robin](#round-robin-blinking-green)
-   - [Envelope](#envelope-blinking-orange)
-   - [Acid](#acid-blinking-red)
-   - [X Ext Modes](#x-ext-modes)
-   - [Explicit Reset](#explicit-reset)
+   - [Round Robin (1.1)](#round-robin-blinking-green-11)
+   - [Envelope (1.1)](#envelope-blinking-orange-11)
+   - [Acid (1.2)](#acid-blinking-red-12)
+   - [X Ext Modes (1.1)](#x-ext-modes-11)
+   - [Explicit Reset (1.1)](#explicit-reset-11)
 3. [Activating Grids Mode](#activating-grids-mode)
 4. [Grids Mode Outputs](#grids-mode-outputs)
 5. [Standard Controls](#standard-controls)
    - [Density Knobs](#density-knobs)
-   - [Drum Fill](#drum-fill-hold-t-range)
+   - [Drum Fill (1.2)](#drum-fill-hold-t-range-12)
    - [Deja Vu (T Side)](#deja-vu-t-side)
 6. [X Shift Layer - Knobs](#x-shift-layer---knobs)
    - [Groove Offset](#groove-offset-x-bias)
@@ -38,7 +38,7 @@ When you need instructions on how to update your marbles go to the [**original m
    - [CV Swap Routing](#cv-swap-routing)
    - [Deja Vu CV Swap](#deja-vu-cv-swap)
 8. [Advanced Settings Layer](#advanced-settings-layer)
-9. [Calibration](#calibration)
+9. [Calibration (1.2)](#calibration-12)
 10. [Patching Ideas](#patching-ideas)
 11. [Credits](#credits)
 
@@ -77,7 +77,7 @@ The **X Mode** button now has 6 modes split into two banks:
 
 <br>
 
-### Round Robin (Blinking green)
+### Round Robin (Blinking green) (1.1)
 
 Cycles through X1/X2/X3 outputs one at a time. Each clock pulse advances to the next channel. When clock is not patched the clocking signal comes from T2.
 
@@ -85,7 +85,7 @@ Cycles through X1/X2/X3 outputs one at a time. Each clock pulse advances to the 
 
 <br>
 
-### Envelope (Blinking orange)
+### Envelope (Blinking orange) (1.1)
 
 Generates attack-decay envelopes on X outputs triggered by t1t2t3 or clock input.
 
@@ -110,7 +110,7 @@ Generates attack-decay envelopes on X outputs triggered by t1t2t3 or clock input
 
 <br>
 
-### Acid (Blinking red)
+### Acid (Blinking red) (1.2)
 
 A TB-303 style generative acid sequencer on the X section, following the pattern rules of the [TB-3PO](https://firmware.phazerville.com/TB-3PO) Hemisphere applet. The X trio becomes one voice:
 
@@ -156,7 +156,7 @@ Knob functions:
 
 <br>
 
-### X Ext Modes
+### X Ext Modes (1.1)
 
 **X Ext** cycles through 3 modes:
 
@@ -170,7 +170,7 @@ Knob functions:
 
 <br>
 
-### Explicit Reset
+### Explicit Reset (1.1)
 
 Press **T Mode** + **X Mode** to cycle through 4 states:
 
@@ -203,7 +203,7 @@ Long press **T Mode** while on drum mode (solid red) to enter Grids mode (blinki
 
 > X1/X2/X3 are following the standard Marbles behaviour. All X controls still function like the original firmware. X2 follows hihat pattern instead of master tempo source.
 
-> In **acid mode** the X outputs are the bassline instead — pitch, trigger and velocity, see [Acid](#acid-blinking-red). The T side is unchanged, and the two run off the same clock so the line stays locked to the drums.
+> In **acid mode** the X outputs are the bassline instead — pitch, trigger and velocity, see [Acid](#acid-blinking-red-12). The T side is unchanged, and the two run off the same clock so the line stays locked to the drums.
 
 <br>
 
@@ -221,7 +221,7 @@ Long press **T Mode** while on drum mode (solid red) to enter Grids mode (blinki
 
 > All three respond to CV input.
 
-### Drum Fill (hold T Range)
+### Drum Fill (hold T Range) (1.2)
 
 **Hold T Range** in Grids mode to trigger a momentary drum fill; the pattern snaps back the instant you let go. A short **tap** still cycles the clock range as normal. Each hold picks one of three fills at random (never the same one twice in a row):
 
@@ -398,7 +398,7 @@ Hold **X Mode** + tap **T Mode** to cycle through pattern banks:
 | **T Range** | Read mode | Normal | Henri |
 | **X Ext** | Accent hang | Normal gates | Hanging accents |
 | **X Range** | Knob swap | Normal knob locations | Knobs swapped |
-| **X Mode** | Explicit reset | Off | 4 states (see [Explicit Reset](#explicit-reset)) |
+| **X Mode** | Explicit reset | Off | 4 states (see [Explicit Reset](#explicit-reset-11)) |
 
 ### Setting Descriptions
 
@@ -416,15 +416,15 @@ When **on** AND an accent variation is active, accents will sustain until the ne
 
 > This turns accent into a sample and hold output driven by accent and the current accent variation.
 
-#### Knob Swap (X Range)
+#### Knob Swap (X Range) (1.1)
 When **on**, the Marbles knobs (**Steps**, **Bias**, **Spread**) directly control Grids coordinates (**Map X**, **Map Y**, **Chaos**). Marbles X parameters use stored alternate values. When **off** (default), Marbles knobs control Marbles X parameters and Grids coordinates comes from the shift layer.
 
 > When toggling, current knob positions are captured to prevent parameter jumps.
 
 > Knob swap is independent of CV swap. CV swap routes CV inputs to Grids coordinates, while knob swap changes which parameters the physical knobs control. Both can be used at the same time.
 
-#### Explicit Reset (X Mode)
-Now supports 4 independent states for T and X sections. See [Explicit Reset](#explicit-reset) for full details.
+#### Explicit Reset (X Mode) (1.1)
+Now supports 4 independent states for T and X sections. See [Explicit Reset](#explicit-reset-11) for full details.
 
 #### Gate length control (t Bias & Jitter)
 While **Holding T Mode** the gate configuration parameters are still accessible. 
@@ -433,7 +433,7 @@ While **Holding T Mode** the gate configuration parameters are still accessible.
 
 <br>
 
-## Calibration
+## Calibration (1.2)
 
 Marbles' calibration gesture (**T Range** + **X Range**) is unchanged, but it is now blocked while the T side is in **Grids mode** or the X side is in **acid mode**. In both, those buttons are fill triggers, and holding them together mid-set was too easy a way to fall into calibration by accident.
 
