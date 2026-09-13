@@ -115,7 +115,14 @@ struct State {
   uint8_t grids_loop_start_at_one;
   uint8_t grids_knob_swap;
 
-  uint8_t padding[10];  // Reserve space for future fields (48 bytes total)
+  // Envelope-mode retrigger behavior (0=hard, 1=serge, 2=legato). Its own
+  // field: it used to alias x_range, silently rewriting the voltage range.
+  uint8_t x_envelope_retrigger;
+  // 0 = saved by Truchets <= 1.1 (pre-version padding); bump on layout or
+  // semantic changes that need a load-time migration.
+  uint8_t settings_version;
+
+  uint8_t padding[8];  // Reserve space for future fields (48 bytes total)
 
   enum { tag = 0x54415453 };
 };

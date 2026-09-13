@@ -103,7 +103,20 @@ class Ui {
   void set_deja_vu_lock(bool deja_vu_lock) {
     deja_vu_lock_ = deja_vu_lock;
   }
-  
+
+  // Momentary drum fill (T Range held in Grids mode). Flavor: 0=Build,
+  // 1=Roll, 2=Scatter; x/y are the random map target for Scatter.
+  bool drum_fill_active() const { return drum_fill_active_; }
+  uint8_t drum_fill_flavor() const { return drum_fill_flavor_; }
+  uint8_t drum_fill_x() const { return drum_fill_x_; }
+  uint8_t drum_fill_y() const { return drum_fill_y_; }
+  // 0 -> 1 over the first couple of seconds of the hold (drives Build).
+  float drum_fill_ramp() const;
+
+  // Momentary acid fill (X Range held in acid mode). 0=Roll, 1=Octave, 2=Slide.
+  bool acid_fill_active() const { return acid_fill_active_; }
+  uint8_t acid_fill_flavor() const { return acid_fill_flavor_; }
+
  private:
   void UpdateLEDs();
   void OnSwitchPressed(const stmlib::Event& e);
@@ -114,6 +127,7 @@ class Ui {
   void TerminateScaleRecording();
   static LedColor MakeColor(uint8_t value, bool color_blind);
   static LedColor DejaVuColor(DejaVuState state, bool lock);
+  static bool FadeGate(uint32_t period_ms);
   
   stmlib::EventQueue<16> queue_;
   
@@ -143,7 +157,21 @@ class Ui {
   bool output_test_mode_;
   uint16_t output_test_forced_dac_code_[4];
   uint32_t calibration_data_;
-  
+
+  // Drum fill (T Range held in Grids).
+  bool drum_fill_active_;
+  uint8_t drum_fill_flavor_;
+  uint8_t drum_fill_x_;
+  uint8_t drum_fill_y_;
+  uint32_t fill_rng_;
+  uint32_t drum_fill_start_time_;
+  uint8_t last_drum_fill_flavor_;
+
+  // Acid fill (X Range held in acid mode).
+  bool acid_fill_active_;
+  uint8_t acid_fill_flavor_;
+  uint8_t last_acid_fill_flavor_;
+
   DISALLOW_COPY_AND_ASSIGN(Ui);
 };
 

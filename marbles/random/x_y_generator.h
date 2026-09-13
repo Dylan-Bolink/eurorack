@@ -58,7 +58,8 @@ enum ControlMode {
   CONTROL_MODE_BUMP,          // 1 - solid yellow
   CONTROL_MODE_TILT,          // 2 - solid red
   CONTROL_MODE_ROUND_ROBIN,   // 3 - blinking green
-  CONTROL_MODE_ENVELOPE       // 4 - blinking yellow
+  CONTROL_MODE_ENVELOPE,      // 4 - blinking yellow
+  CONTROL_MODE_ACID           // 5 - blinking red
 };
 
 enum OutputGroup {
@@ -74,6 +75,11 @@ const size_t kNumChannels = kNumXChannels + kNumYChannels;
 struct GroupSettings {
   ControlMode control_mode;
   VoltageRange voltage_range;
+  bool acid_half_time;  // Grids mode runs the master clock at 2x; step at /2.
+  bool chromatic;       // acid: bypass scale quantizer, round to semitones
+  bool acid_fill_active;    // acid: X Range held -> momentary fill
+  uint8_t acid_fill_flavor; // 0=Roll, 1=Octave run, 2=Slide run
+  uint8_t envelope_retrigger;  // 0=hard reset, 1=serge, 2=legato
   bool register_mode;
   bool use_shift_register;
   float register_value;
@@ -122,6 +128,12 @@ class XYGenerator {
       float* output,
       size_t size);
   
+  // Current Grids drum step, so the acid half-time divider can be phase-locked
+  // to the drum grid (acid steps land on even drum steps).
+  void set_acid_align_step(uint8_t step) {
+    acid_align_step_ = step;
+  }
+
   void LoadScale(int channel, int scale_index, const Scale& scale) {
     output_channel_[channel].LoadScale(scale_index, scale);
   }
@@ -148,6 +160,28 @@ class XYGenerator {
   float env_phase_[kNumXChannels];
   float env_rate_[kNumXChannels];
   float env_prev_ramp_[kNumXChannels];
+
+  // Re-seed the acid phase/half-time state, aligning steps to the drum grid.
+  void ResetAcidPhase();
+
+  // Acid (TB-3PO style) sequencer state.
+  float acid_prev_ramp_;
+  int acid_div_;            // half-time divider position (Grids mode)
+  bool acid_gate_;
+  bool acid_accent_;
+  float acid_level_;        // X3 per-step velocity (accent), flat per note
+  bool acid_slide_;         // current step slides into the next one
+  bool acid_prev_accent_;   // for the anti-consecutive 303 rules
+  uint8_t acid_accent_run_; // consecutive accents, so pairs survive
+  float acid_gate_length_;  // this step's gate length, as a phase fraction
+  float acid_pitch_;        // slewed pitch output
+  float acid_slide_target_;
+  float acid_prev_target_;  // last computed note, for repeats
+  uint8_t acid_align_step_;      // latest Grids step, for half-time phase-lock
+  int prev_clock_source_;        // re-sync wrap trackers on source change
+  ControlMode prev_control_mode_;  // re-sync wrap trackers on mode change
+  bool acid_pending_loop_align_;   // snap riff to top at next Grids bar-start
+  uint8_t acid_prev_tick_step_;    // Grids step at the previous acid step
 
   DISALLOW_COPY_AND_ASSIGN(XYGenerator);
 };

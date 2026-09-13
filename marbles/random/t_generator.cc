@@ -173,6 +173,8 @@ void TGenerator::Init(RandomStream* random_stream, float sr) {
   groove_delay_for_t1_ = true;
 
   grids_sync_playheads_ = false;
+  acid_active_ = false;
+  grids_snare_roll_ = false;
   grids_loop_start_at_one_ = false;
   grids_free_step_ = 0;
   fill(grids_part_perturbation_, grids_part_perturbation_ + 3, 0);
@@ -467,6 +469,12 @@ int TGenerator::GenerateGrids(const RandomVector& x) {
     if (thresh_i > 255) thresh_i = 255;
     snare_trig = (snare_lvl > thresh_i);
     snare_accent = snare_trig && (snare_lvl > grids_accent_threshold_);
+    if (grids_snare_roll_) {
+      // Roll fill: hit every step. Accents still follow the map levels, so
+      // the roll keeps the pattern's dynamics.
+      snare_trig = true;
+      snare_accent = snare_lvl > grids_accent_threshold_;
+    }
   }
 
   if (dens_hh_ > kDead) {
@@ -744,7 +752,10 @@ void TGenerator::Process(bool use_external_clock, bool* reset, const GateFlags* 
         }
       }
 
-      if (!hh_gate) {
+      // Normally the master ramp is gated by the hi-hat pattern so the X
+      // section tracks the hats in Grids mode. Acid mode instead wants the
+      // clean master clock, so leave the ramp untouched when it is active.
+      if (!hh_gate && !acid_active_) {
         *(ramps.master - 1) = 0.0f;
       }
     }

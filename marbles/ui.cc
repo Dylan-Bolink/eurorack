@@ -41,6 +41,8 @@ namespace marbles {
 
 const int32_t kLongPressDuration = 2000;
 const int32_t kMediumPressDuration = 1000;
+const int32_t kFillStartTime = 40;  // fill kicks in this early (inside the tap area)
+const int32_t kFillTapTime = 150;   // release within this still counts as a tap
 
 using namespace std;
 using namespace stmlib;
@@ -105,7 +107,19 @@ void Ui::Init(
   output_test_mode_ = false;
   explicit_reset_flash_time_ = 0;
   x_mode_flash_time_ = 0;
-  
+
+  drum_fill_active_ = false;
+  drum_fill_flavor_ = 0;
+  drum_fill_x_ = 0;
+  drum_fill_y_ = 0;
+  fill_rng_ = 0x12345678;
+  drum_fill_start_time_ = 0;
+  last_drum_fill_flavor_ = 0xff;
+
+  acid_fill_active_ = false;
+  acid_fill_flavor_ = 0;
+  last_acid_fill_flavor_ = 0xff;
+
   if (switches_.pressed_immediate(SWITCH_X_MODE)) {
     if (state->color_blind == 1) {
       state->color_blind = 0;
@@ -204,6 +218,64 @@ void Ui::Poll() {
     }
   }
 
+  // Drum fill: holding T Range (alone) in Grids mode triggers a momentary,
+  // randomly-chosen fill instead of cycling the clock range. A short tap still
+  // cycles the range, resolved on release as usual.
+  {
+    bool grids = settings_->state().t_model >= T_GENERATOR_MODEL_GRIDS;
+    // X Range may be held too (both fills at once); only the shift buttons
+    // block arming, since T Range combos with them mean something else.
+    bool t_range_fill = switches_.pressed(SWITCH_T_RANGE)
+        && !switches_.pressed(SWITCH_X_MODE)
+        && !switches_.pressed(SWITCH_T_MODEL);
+    if (grids && t_range_fill && !ignore_release_[SWITCH_T_RANGE]
+        && !drum_fill_active_) {
+      int32_t held = system_clock.milliseconds() - press_time_[SWITCH_T_RANGE];
+      if (held > kFillStartTime) {
+        fill_rng_ = fill_rng_ * 1664525u + 1013904223u
+            + static_cast<uint32_t>(system_clock.milliseconds());
+        // Never the same flavor twice in a row: pick uniformly among the
+        // other two once a previous flavor exists.
+        drum_fill_flavor_ = last_drum_fill_flavor_ < 3
+            ? (last_drum_fill_flavor_ + 1 + fill_rng_ % 2) % 3
+            : fill_rng_ % 3;
+        last_drum_fill_flavor_ = drum_fill_flavor_;
+        drum_fill_x_ = (fill_rng_ >> 8) & 0xff;
+        drum_fill_y_ = (fill_rng_ >> 16) & 0xff;
+        drum_fill_start_time_ = system_clock.milliseconds();
+        drum_fill_active_ = true;
+      }
+    }
+    if (drum_fill_active_ && !switches_.pressed(SWITCH_T_RANGE)) {
+      drum_fill_active_ = false;
+    }
+  }
+
+  // Acid fill: holding X Range (alone) in acid mode triggers a momentary,
+  // randomly-chosen fill instead of tapping through scales.
+  {
+    bool acid = settings_->state().x_control_mode == 5;  // CONTROL_MODE_ACID
+    bool x_range_fill = switches_.pressed(SWITCH_X_RANGE)
+        && !switches_.pressed(SWITCH_X_MODE)
+        && !switches_.pressed(SWITCH_T_MODEL);
+    if (acid && x_range_fill && !ignore_release_[SWITCH_X_RANGE]
+        && !acid_fill_active_) {
+      int32_t held = system_clock.milliseconds() - press_time_[SWITCH_X_RANGE];
+      if (held > kFillStartTime) {
+        fill_rng_ = fill_rng_ * 1664525u + 1013904223u
+            + static_cast<uint32_t>(system_clock.milliseconds());
+        acid_fill_flavor_ = last_acid_fill_flavor_ < 3
+            ? (last_acid_fill_flavor_ + 1 + fill_rng_ % 2) % 3
+            : fill_rng_ % 3;
+        last_acid_fill_flavor_ = acid_fill_flavor_;
+        acid_fill_active_ = true;
+      }
+    }
+    if (acid_fill_active_ && !switches_.pressed(SWITCH_X_RANGE)) {
+      acid_fill_active_ = false;
+    }
+  }
+
   // Flush all pending state changes once both shift buttons are released
   if (grids_save_flag_
       && !switches_.pressed(SWITCH_X_MODE)
@@ -215,9 +287,33 @@ void Ui::Poll() {
   UpdateLEDs();
 }
 
+float Ui::drum_fill_ramp() const {
+  // 0 -> 1 over the first 2s of the hold; the Build fill lerps its
+  // parameters along this so holding longer keeps raising the energy.
+  if (!drum_fill_active_) {
+    return 0.0f;
+  }
+  float ramp = static_cast<float>(
+      system_clock.milliseconds() - drum_fill_start_time_) / 2000.0f;
+  return ramp < 1.0f ? ramp : 1.0f;
+}
+
+/* static */
+bool Ui::FadeGate(uint32_t period_ms) {
+  // Software-PWM fade gate: returns the instantaneous on/off bit for a soft
+  // triangle fade in/out over period_ms, replacing a hard square blink.
+  // Mirrors the dithering already used in DejaVuColor().
+  uint32_t phase = system_clock.milliseconds() % period_ms;
+  int tri = (phase << 5) / period_ms;         // 0..31 ramp
+  tri = tri < 16 ? tri : 31 - tri;            // 0..15..0 triangle
+  int pw = system_clock.milliseconds() & 15;  // 16-step PWM counter
+  return tri >= pw;
+}
+
 /* static */
 LedColor Ui::MakeColor(uint8_t value, bool color_blind) {
-  bool slow_blink = (system_clock.milliseconds() & 255) > 128;
+  // 512ms breathe, matching Tides' output-mode / frequency-range LEDs.
+  bool slow_blink = FadeGate(512);
 
   uint8_t bank = value >= 3 ? 1 : 0;
   value -= bank * 3;
@@ -266,8 +362,8 @@ LedColor Ui::DejaVuColor(DejaVuState state, bool lock) {
 
 void Ui::UpdateLEDs() {
   bool blink = (system_clock.milliseconds() & 127) > 64;
-  bool slow_blink = (system_clock.milliseconds() & 255) > 128;
-  bool fast_blink = (system_clock.milliseconds() & 63) > 32;
+  bool slow_blink = FadeGate(256);
+  bool fast_blink = FadeGate(64);
   const State& state = settings_->state();
   bool cb = state.color_blind == 1;
   
@@ -312,7 +408,7 @@ void Ui::UpdateLEDs() {
         } else if (settings_->state().t_model == T_GENERATOR_MODEL_GRIDS &&
             switches_.pressed(SWITCH_X_MODE) && grids_held_first == SWITCH_X_MODE) {
 
-          bool fast_blink = (system_clock.milliseconds() & 127) > 64;
+          bool fast_blink = FadeGate(128);
 
           // Map X: off=off, 1=green (steps), 2=yellow (t_bias)
           LedColor x_color = LED_COLOR_OFF;
@@ -334,11 +430,17 @@ void Ui::UpdateLEDs() {
 
           // T mode LED: bank color + interpolation blink
           {
-            LedColor bank_colors[] = { LED_COLOR_GREEN, LED_COLOR_YELLOW, LED_COLOR_RED };
-            LedColor bank_color = bank_colors[state.grids_bank];
-            bool interp_blink = !state.grids_interpolation && slow_blink;
-            leds_.set(LED_T_MODEL, state.grids_interpolation ? bank_color
-                : (interp_blink ? bank_color : LED_COLOR_OFF));
+            if (state.grids_bank == 3) {
+              // Divider bank: no drum pattern bank, so no LED. None of the
+              // other 6 states are ever fully off, so this stays distinct.
+              leds_.set(LED_T_MODEL, LED_COLOR_OFF);
+            } else {
+              LedColor bank_colors[] = { LED_COLOR_GREEN, LED_COLOR_YELLOW, LED_COLOR_RED };
+              LedColor bank_color = bank_colors[state.grids_bank];
+              bool interp_blink = !state.grids_interpolation && slow_blink;
+              leds_.set(LED_T_MODEL, state.grids_interpolation ? bank_color
+                  : (interp_blink ? bank_color : LED_COLOR_OFF));
+            }
           }
 
           // T deja vu lock CV swap
@@ -362,8 +464,12 @@ void Ui::UpdateLEDs() {
         } else {
           leds_.set(LED_T_RANGE, MakeColor(state.t_range, cb));
           if (mode_ == UI_MODE_NORMAL) {
-            if (state.x_control_mode == 4) {  // CONTROL_MODE_ENVELOPE
-              leds_.set(LED_X_RANGE, MakeColor(state.x_range, cb));
+            if (state.x_control_mode == 5) {  // acid: X Range = scale select
+              leds_.set(LED_X_RANGE, state.x_scale >= kNumScales
+                  ? LED_COLOR_OFF  // chromatic
+                  : MakeColor(state.x_scale, cb));
+            } else if (state.x_control_mode == 4) {  // envelope: retrigger mode
+              leds_.set(LED_X_RANGE, MakeColor(state.x_envelope_retrigger, cb));
             } else {
               leds_.set(LED_X_RANGE,
                         state.x_register_mode == X_REGISTER_MODE_REGISTER
@@ -372,7 +478,9 @@ void Ui::UpdateLEDs() {
             }
             {
               LedColor x_ext_color = LED_COLOR_OFF;
-              if (state.x_register_mode == X_REGISTER_MODE_REGISTER) {
+              if (state.x_control_mode == 4) {
+                // Envelope mode ignores register modes; keep the LED honest.
+              } else if (state.x_register_mode == X_REGISTER_MODE_REGISTER) {
                 x_ext_color = LED_COLOR_GREEN;
               } else if (state.x_register_mode == X_REGISTER_MODE_VOCT_OFFSET) {
                 x_ext_color = slow_blink ? LED_COLOR_GREEN : LED_COLOR_OFF;
@@ -467,6 +575,25 @@ void Ui::UpdateLEDs() {
     }
   }
 
+  // Fill animation: while a fill is active, flicker the relevant section's
+  // LEDs through random colors so you can see it fire.
+  if (drum_fill_active_ || acid_fill_active_) {
+    uint32_t frame = system_clock.milliseconds() >> 6;
+    uint32_t h = frame * 2654435761u;
+    uint32_t h2 = (frame + 19) * 2654435761u;
+    static const LedColor kFlick[4] = {
+        LED_COLOR_RED, LED_COLOR_YELLOW, LED_COLOR_GREEN, LED_COLOR_OFF
+    };
+    if (drum_fill_active_) {
+      leds_.set(LED_T_MODEL, kFlick[(h >> 28) & 3]);
+      leds_.set(LED_T_RANGE, kFlick[(h >> 24) & 3]);
+    }
+    if (acid_fill_active_) {
+      leds_.set(LED_X_CONTROL_MODE, kFlick[(h2 >> 28) & 3]);
+      leds_.set(LED_X_RANGE, kFlick[(h2 >> 24) & 3]);
+    }
+  }
+
   leds_.Write();
 }
 
@@ -487,11 +614,20 @@ void Ui::OnSwitchReleased(const Event& e) {
     return;
   }
   
-  // Check if the other switch is still pressed.
-  if (e.control_id == SWITCH_T_RANGE && switches_.pressed(SWITCH_X_RANGE)) {
-    mode_ = UI_MODE_CALIBRATION_1;
-    ignore_release_[SWITCH_T_RANGE] = ignore_release_[SWITCH_X_RANGE] = true;
-    return;
+  // Calibration is entered by holding both Range buttons and releasing one.
+  // In Grids or acid mode those buttons are the fill triggers, so skip it there
+  // to avoid accidentally dropping into calibration. (Calibrate from a normal
+  // X/T mode.)
+  {
+    const State& s = settings_->state();
+    bool perf_mode = s.t_model >= T_GENERATOR_MODEL_GRIDS
+        || s.x_control_mode == 5;  // CONTROL_MODE_ACID
+    if (e.control_id == SWITCH_T_RANGE && switches_.pressed(SWITCH_X_RANGE)
+        && !perf_mode) {
+      mode_ = UI_MODE_CALIBRATION_1;
+      ignore_release_[SWITCH_T_RANGE] = ignore_release_[SWITCH_X_RANGE] = true;
+      return;
+    }
   }
   
   State* state = settings_->mutable_state();
@@ -545,10 +681,17 @@ void Ui::OnSwitchReleased(const Event& e) {
     bool is_grids = state->t_model >= T_GENERATOR_MODEL_GRIDS;
     if (!is_grids || grids_held_first == SWITCH_X_MODE) {
       ignore_release_[SWITCH_T_MODEL] = ignore_release_[SWITCH_X_MODE] = true;
-      uint8_t combined = state->grids_bank + (state->grids_interpolation ? 0 : 3);
-      combined = (combined + 1) % 6;
-      state->grids_bank = combined % 3;
-      state->grids_interpolation = (combined < 3) ? 1 : 0;
+      uint8_t combined = state->grids_bank == 3
+          ? 6
+          : state->grids_bank + (state->grids_interpolation ? 0 : 3);
+      combined = (combined + 1) % 7;
+      if (combined == 6) {
+        state->grids_bank = 3;
+        state->grids_interpolation = 1;        // bank 3 always smooth
+      } else {
+        state->grids_bank = combined % 3;
+        state->grids_interpolation = (combined < 3) ? 1 : 0;
+      }
       grids_save_flag_ = true;
       return;
     }
@@ -688,6 +831,16 @@ void Ui::OnSwitchReleased(const Event& e) {
         if (mode_ >= UI_MODE_CALIBRATION_1 && mode_ <= UI_MODE_CALIBRATION_4) {
           NextCalibrationStep();
         } else {
+          // In Grids a hold is a drum fill, so only a genuine tap cycles the
+          // clock range. Outside Grids, any press cycles it (no fill there).
+          bool grids = state->t_model >= T_GENERATOR_MODEL_GRIDS;
+          if (grids && e.data >= kFillTapTime) {
+            // Releasing a fill changes nothing, so skip the flash write too:
+            // SaveState() burns a chunk on every call and eventually a
+            // blocking sector erase, and a fill is a performance gesture
+            // repeated dozens of times a set.
+            break;
+          }
           state->t_range = (state->t_range + 1) % 3;
         }
         SaveState();
@@ -703,11 +856,11 @@ void Ui::OnSwitchReleased(const Event& e) {
           if (is_long) {
             state->x_control_mode -= 3;
           } else {
-            state->x_control_mode = 3 + (state->x_control_mode - 3 + 1) % 2;
+            state->x_control_mode = 3 + (state->x_control_mode - 3 + 1) % 3;
           }
         } else {
           if (is_long) {
-            state->x_control_mode = 3;
+            state->x_control_mode += 3;
           } else {
             state->x_control_mode = (state->x_control_mode + 1) % 3;
           }
@@ -715,13 +868,22 @@ void Ui::OnSwitchReleased(const Event& e) {
         if (is_long && state->t_model >= T_GENERATOR_MODEL_GRIDS) {
           x_mode_flash_time_ = system_clock.milliseconds() | 1;
         }
+        // Acid has no External X Ext state; fold it back to Normal on entry.
+        if (state->x_control_mode == 5  // CONTROL_MODE_ACID
+            && state->x_register_mode == X_REGISTER_MODE_REGISTER) {
+          state->x_register_mode = X_REGISTER_MODE_OFF;
+        }
         SaveState();
       }
       break;
 
     case SWITCH_X_EXT:
       if (mode_ == UI_MODE_RECORD_SCALE) {
+        // x_scale can hold the acid chromatic sentinel (kNumScales), which
+        // is not a real slot — recording there would write past the scale
+        // array. Fall back to slot 0.
         int scale_index = settings_->state().x_scale;
+        if (scale_index >= kNumScales) scale_index = 0;
         bool success = true;
         if (e.data >= kLongPressDuration) {
           settings_->ResetScale(scale_index);
@@ -738,7 +900,22 @@ void Ui::OnSwitchReleased(const Event& e) {
         mode_ = UI_MODE_RECORD_SCALE;
         scale_recorder_->Clear();
       } else {
-        state->x_register_mode = (state->x_register_mode + 1) % X_REGISTER_MODE_LAST;
+        if (state->x_control_mode == 5) {  // CONTROL_MODE_ACID
+          // External (register) does nothing in acid, so toggle straight
+          // between Normal (0) and Transpose (2), skipping it.
+          state->x_register_mode =
+              (state->x_register_mode == X_REGISTER_MODE_VOCT_OFFSET)
+                  ? X_REGISTER_MODE_OFF
+                  : X_REGISTER_MODE_VOCT_OFFSET;
+        } else if (state->x_control_mode == 4) {  // CONTROL_MODE_ENVELOPE
+          // No register mode applies to envelopes; ignore the tap (and keep
+          // the user's setting intact for the other modes). Nothing changed,
+          // so skip the flash write too.
+          break;
+        } else {
+          state->x_register_mode =
+              (state->x_register_mode + 1) % X_REGISTER_MODE_LAST;
+        }
         SaveState();
       }
       break;
@@ -747,15 +924,39 @@ void Ui::OnSwitchReleased(const Event& e) {
       if (mode_ >= UI_MODE_CALIBRATION_1 && mode_ <= UI_MODE_CALIBRATION_4) {
         NextCalibrationStep();
       } else if (state->x_control_mode == 4) {  // CONTROL_MODE_ENVELOPE
-        if (e.data < kLongPressDuration) {
-          state->x_range = (state->x_range + 1) % 3;  // retrigger mode
+        // Retrigger mode lives in its own field: cycling x_range here used
+        // to silently rewrite the voltage range for every other mode.
+        if (e.data >= kLongPressDuration) {
+          // Scale select stays reachable — x_scale still quantizes Y.
+          if (mode_ == UI_MODE_NORMAL) {
+            mode_ = UI_MODE_SELECT_SCALE;
+          }
+        } else if (mode_ == UI_MODE_SELECT_SCALE) {
+          state->x_scale = state->x_scale >= kNumScales
+              ? 0
+              : (state->x_scale + 1) % kNumScales;
+        } else {
+          state->x_envelope_retrigger = (state->x_envelope_retrigger + 1) % 3;
         }
+      } else if (state->x_control_mode == 5) {  // CONTROL_MODE_ACID
+        // Tap cycles the scale (index kNumScales = chromatic, LED off).
+        // A longer hold is the fill (handled in the poll loop), so only a
+        // genuine tap changes the scale.
+        if (mode_ != UI_MODE_NORMAL || e.data >= kFillTapTime) {
+          // Releasing a fill changes nothing; skip the flash write. See the
+          // note in SWITCH_T_RANGE.
+          break;
+        }
+        state->x_scale = (state->x_scale + 1) % (kNumScales + 1);
       } else if (e.data >= kLongPressDuration) {
         if (mode_ == UI_MODE_NORMAL) {
           mode_ = UI_MODE_SELECT_SCALE;
         }
       } else if (mode_ == UI_MODE_SELECT_SCALE) {
-        state->x_scale = (state->x_scale + 1) % kNumScales;
+        // Coming from the acid chromatic sentinel, start the cycle at 0.
+        state->x_scale = state->x_scale >= kNumScales
+            ? 0
+            : (state->x_scale + 1) % kNumScales;
       } else {
         if (state->x_register_mode != X_REGISTER_MODE_REGISTER) {
           state->x_range = (state->x_range + 1) % 3;
