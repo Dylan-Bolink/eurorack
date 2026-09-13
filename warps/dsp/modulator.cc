@@ -45,6 +45,13 @@ const float kXmodCarrierGain = 0.5f;
 const float kSamplePeriod = 1.0f / 96000.0f;
 const float kToFloat = 1.0f / 32768.0f;
 
+// Exact equivalent of floorf() for |x| < 2^31, without the libm call.
+// (int32_t) truncates toward zero, so negative non-integers need one more step down.
+inline float FastFloor(float x) {
+  float t = static_cast<float>(static_cast<int32_t>(x));
+  return t > x ? t - 1.0f : t;
+}
+
 inline float SkewRawAlgorithm(float r) {
     float x = r * 2.0f - 1.0f;
     float skewed = (x * x * x + 1.0f) * 0.5f;
@@ -594,6 +601,12 @@ void Modulator::ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size)
   filter_[0].set_f<stmlib::FREQUENCY_FAST>(0.0008f);
   filter_[1].set_f<stmlib::FREQUENCY_FAST>(0.0008f);
 
+  // Loop-invariant: feedback is read from previous_parameters_ before the loop,
+  // and set_f costs a tan polynomial plus a divide for gi_.
+  const float feedback_over_12 = feedback * (1.0f / 12.0f);
+  filter_[2].set_f<stmlib::FREQUENCY_FAST>(feedback_over_12);
+  filter_[3].set_f<stmlib::FREQUENCY_FAST>(feedback_over_12);
+
   while (size--) {
 
     static float lp_time = 0.0f;
@@ -622,8 +635,6 @@ void Modulator::ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size)
       fb.l = feedback_sample.l + noise1 * 0.002f;
       fb.r = feedback_sample.r + noise2 * 0.002f;
       // apply filters: fixed high-pass and varying low-pass with attenuation
-      filter_[2].set_f<stmlib::FREQUENCY_FAST>(feedback / 12.0f);
-      filter_[3].set_f<stmlib::FREQUENCY_FAST>(feedback / 12.0f);
       fb.l = filter_[0].Process<stmlib::FILTER_MODE_HIGH_PASS>(fb.l);
       fb.r = filter_[1].Process<stmlib::FILTER_MODE_HIGH_PASS>(fb.r);
       fb.l = feedback * (2.0f - feedback) * 1.1f *
@@ -631,8 +642,8 @@ void Modulator::ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size)
       fb.r = feedback * (2.0f - feedback) * 1.1f *
         filter_[3].Process<stmlib::FILTER_MODE_LOW_PASS>(fb.r);
       // apply soft saturation with a bit of bias
-      fb.l = SoftLimit(fb.l * 1.4f + 0.1f) / 1.4f - SoftLimit(0.1f);
-      fb.r = SoftLimit(fb.r * 1.4f + 0.1f) / 1.4f - SoftLimit(0.1f);
+      fb.l = SoftLimit(fb.l * 1.4f + 0.1f) * (1.0f / 1.4f) - SoftLimit(0.1f);
+      fb.r = SoftLimit(fb.r * 1.4f + 0.1f) * (1.0f / 1.4f) - SoftLimit(0.1f);
     } else if (parameters_.carrier_shape == 0) {
       // open feedback loop
       fb.l = feedback * 1.1f * in.r;
@@ -649,8 +660,8 @@ void Modulator::ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size)
 
     if (freeze_active) {
       // When frozen, soft-clip the feedback and write only that to the buffer.
-      fb.l = stmlib::SoftLimit(fb.l * 0.95f) / 0.95f;
-      fb.r = stmlib::SoftLimit(fb.r * 0.95f) / 0.95f;
+      fb.l = stmlib::SoftLimit(fb.l * 0.95f) * (1.0f / 0.95f);
+      fb.r = stmlib::SoftLimit(fb.r * 0.95f) * (1.0f / 0.95f);
       mix.l = fb.l;
       mix.r = fb.r;
     } else {
@@ -751,7 +762,7 @@ void Modulator::ProcessDelay(ShortFrame* input, ShortFrame* output, size_t size)
     if (!freeze_active) {
       // attenuate output at low sample rate to mask stupid
       // discontinuity bug
-      float gain = sample_rate / 0.01f;
+      float gain = sample_rate * (1.0f / 0.01f);
       CONSTRAIN(gain, 0.0f, 1.0f);
       wet.l *= gain * gain;
       wet.r *= gain * gain;
@@ -1219,8 +1230,8 @@ void Modulator::ProcessCrushMixer(ShortFrame* input, ShortFrame* output, size_t 
           float a = stmlib::SoftLimit(aliased_A * drive);
           float b = stmlib::SoftLimit(aliased_B * drive);
           const float levels = 32.0f;
-          processed_A = floorf(a * levels) / levels;
-          processed_B = floorf(b * levels) / levels;
+          processed_A = FastFloor(a * levels) / levels;
+          processed_B = FastFloor(b * levels) / levels;
       } else {
           // Odd harmonics (default symmetric)
           processed_A = stmlib::SoftLimit(aliased_A * drive);
@@ -1638,7 +1649,7 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       // --- Tracking Instability (far end of knob, >85%) ---
       float tracking_instability = 0.0f;
       if (effect_amount > 0.85f) {
-          float tracking_amount = (effect_amount - 0.85f) / 0.15f;
+          float tracking_amount = (effect_amount - 0.85f) * (1.0f / 0.15f);
           tracking_amount *= tracking_amount;  // quadratic ramp — gentle onset
 
           tracking_lfo_phase += (8.0f + effect_amount * 12.0f) * kSamplePeriod;
@@ -1705,7 +1716,7 @@ void Modulator::ProcessCassetteMixer(ShortFrame* input, ShortFrame* output, size
       float filtered_B = tilt_hpf_B * (1.0f - tilt_mix) + tilt_lpf_B * tilt_mix;
 
       // --- 60Hz Hum ---
-      float random_val = static_cast<float>((hiss_rng_state_ >> 9) & 0x7FFFFF) / 8388607.0f;
+      float random_val = static_cast<float>((hiss_rng_state_ >> 9) & 0x7FFFFF) * (1.0f / 8388607.0f);
       static float hum_instability = 0.0f;
       float target = age_chewed * (random_val - 0.5f) * 0.02f;
       ONE_POLE(hum_instability, target, 0.0005f);
@@ -1838,7 +1849,7 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
 
         // --- Random position jumps (frame corruption) ---
         float jump_chance = effect_amount * effect_amount * 0.005f * (1.0f + degradation * 3.0f);
-        float rnd_jump = (float)((corrupt_rng >> 8) & 0x7fffff) / 8388607.0f;
+        float rnd_jump = (float)((corrupt_rng >> 8) & 0x7fffff) * (1.0f / 8388607.0f);
         if (rnd_jump < jump_chance) {
             corrupt_rng = corrupt_rng * 1664525u + 1013904223u;
             float jump_offset = (float)(corrupt_rng % kSharedDelaySize);
@@ -1861,9 +1872,9 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
             // Corrupt the integer representation
             const uint32_t masks[] = { 0xFF00, 0xFC00, 0xF000, 0xC000 };
             uint32_t mask = masks[quality];
-            float corruption_amount = (effect_amount - 0.2f) / 0.8f;
+            float corruption_amount = (effect_amount - 0.2f) * (1.0f / 0.8f);
 
-            float rnd_bit = (float)((corrupt_rng >> 16) & 0xFF) / 255.0f;
+            float rnd_bit = (float)((corrupt_rng >> 16) & 0xFF) * (1.0f / 255.0f);
             if (rnd_bit < corruption_amount * 0.3f) {
                 int16_t sl = (int16_t)(read_l * 32768.0f);
                 int16_t sr = (int16_t)(read_r * 32768.0f);
@@ -1878,13 +1889,13 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
         freeze_timer -= kSamplePeriod;
         if (!frame_frozen) {
             float freeze_chance = effect_amount * effect_amount * 0.01f * (1.0f + degradation * 2.0f);
-            float rnd_frz = (float)((corrupt_rng >> 12) & 0xFFF) / 4095.0f;
+            float rnd_frz = (float)((corrupt_rng >> 12) & 0xFFF) * (1.0f / 4095.0f);
             if (rnd_frz < freeze_chance) {
                 frame_frozen = true;
                 frozen_l = read_l;
                 frozen_r = read_r;
                 // Freeze duration: 5-50ms
-                freeze_timer = 0.005f + (float)((corrupt_rng >> 20) & 0xFF) / 255.0f * 0.045f;
+                freeze_timer = 0.005f + (float)((corrupt_rng >> 20) & 0xFF) * (0.045f / 255.0f);
             }
         }
         if (frame_frozen) {
@@ -2187,8 +2198,8 @@ void Modulator::ProcessLossyMixer(ShortFrame* input, ShortFrame* output, size_t 
 
         // --- Bit crushing: quality 3=none, 2=12bit, 1=10bit, 0=8bit ---
         if (do_bitcrush) {
-            processed_A = floorf(processed_A * bit_scale + 0.5f) * bit_scale_inv;
-            processed_B = floorf(processed_B * bit_scale + 0.5f) * bit_scale_inv;
+            processed_A = FastFloor(processed_A * bit_scale + 0.5f) * bit_scale_inv;
+            processed_B = FastFloor(processed_B * bit_scale + 0.5f) * bit_scale_inv;
         }
       }
 
@@ -2415,8 +2426,9 @@ void Modulator::ProcessDreamyMixer(ShortFrame* input, ShortFrame* output, size_t
       float delay_r_samples = base_delay_samples + stereo_offset - (smear_mod * smear_mod_amount);
 
       const float min_delay = 32.0f;
-      delay_l_samples = fmaxf(delay_l_samples, min_delay);
-      delay_r_samples = fmaxf(delay_r_samples, min_delay);
+      // !(a >= b) also catches NaN, matching fmaxf's operand-scrubbing behaviour.
+      if (!(delay_l_samples >= min_delay)) delay_l_samples = min_delay;
+      if (!(delay_r_samples >= min_delay)) delay_r_samples = min_delay;
 
       const float pitch_threshold = 0.8f;
       float pitch_shift_rate = 0.0f;
@@ -2518,7 +2530,8 @@ void Modulator::ProcessDreamyMixer(ShortFrame* input, ShortFrame* output, size_t
       }
 
       // --- Feedback ---
-      float effect_ramp = fminf(effect_amount / 0.8f, 1.0f);
+      float effect_ramp = effect_amount * (1.0f / 0.8f);
+      if (!(effect_ramp <= 1.0f)) effect_ramp = 1.0f;
       const float max_feedback_levels[] = { 0.80f, 0.75f, 0.65f, 0.55f };
       float feedback_amount = effect_ramp * max_feedback_levels[quality];
 
@@ -2538,7 +2551,7 @@ void Modulator::ProcessDreamyMixer(ShortFrame* input, ShortFrame* output, size_t
 
       float effective_drive = smear_drive;
       if (pitch_shift_rate > 0.0f) {
-          float pitch_ramp = pitch_shift_rate / 0.498f;
+          float pitch_ramp = pitch_shift_rate * (1.0f / 0.498f);
           float drive_reduction = pitch_ramp * (1.0f - 1.0f / smear_drive);
           effective_drive = smear_drive * (1.0f - drive_reduction);
       }
@@ -2588,8 +2601,8 @@ void Modulator::ProcessDreamyMixer(ShortFrame* input, ShortFrame* output, size_t
       float delay_r = base_delay - drift_mod - detune_offset;
 
       const float min_delay = 32.0f;
-      delay_l = fmaxf(delay_l, min_delay);
-      delay_r = fmaxf(delay_r, min_delay);
+      if (!(delay_l >= min_delay)) delay_l = min_delay;
+      if (!(delay_r >= min_delay)) delay_r = min_delay;
 
       // Read from delay buffer (halve offsets — buffer is decimated in drift mode)
       const float buffer_size_f = (float)kSharedDelaySize;

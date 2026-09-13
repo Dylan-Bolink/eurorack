@@ -31,6 +31,8 @@
 #include <algorithm>
 
 #include "stmlib/system/system_clock.h"
+
+#include "warps/profiler.h"
 #include "stmlib/dsp/units.h"
 
 #include "warps/cv_scaler.h"
@@ -288,6 +290,17 @@ void Ui::Poll() {
     leds_.set_osc(255, 255);
     leds_.set_main(red >> 3, green >> 3, blue >> 3);
   }
+#if PROFILE_CPU
+  // CPU meter takes over the main LED, except while the button is held (mode
+  // selection needs its normal colour feedback) or during calibration/panic.
+  if (mode_ == UI_MODE_NORMAL &&
+      !modulator_->bypass() &&
+      !switches_.pressed(0)) {
+    uint8_t rgb[3];
+    profiler.RenderLed(modulator_->feature_mode(), rgb);
+    leds_.set_main(rgb[0], rgb[1], rgb[2]);
+  }
+#endif  // PROFILE_CPU
   leds_.Write();
 }
 

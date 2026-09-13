@@ -34,6 +34,17 @@ void System::Init(bool application) {
   if (application) {
     NVIC_SetVectorTable(NVIC_VectTab_FLASH, 0x8000);
   }
+
+  // Flush-to-zero: denormals are inaudible here, and every feedback path in the
+  // modulator (delay, smear, drift, comb, the one-poles) decays through them
+  // whenever the input goes quiet.
+  //
+  // FPDSCR is the one that matters. With FPCCR.ASPEN set -- it is, by reset --
+  // the hardware loads FPSCR from FPDSCR on exception entry, and all the audio
+  // DSP runs inside the codec DMA interrupt. Setting only FPSCR here would
+  // leave the audio path untouched. FPSCR is set as well, for the main loop.
+  FPU->FPDSCR |= FPU_FPDSCR_FZ_Msk;
+  __set_FPSCR(__get_FPSCR() | FPU_FPDSCR_FZ_Msk);
 }
 
 void System::StartTimers() {

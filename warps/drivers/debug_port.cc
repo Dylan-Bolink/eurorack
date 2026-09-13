@@ -32,7 +32,7 @@
 
 namespace warps {
 
-void DebugPort::Init() {
+void DebugPort::Init(uint32_t baud_rate) {
   RCC_APB2PeriphClockCmd(RCC_APB2Periph_USART1, ENABLE);
 	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA, ENABLE);
   
@@ -50,7 +50,7 @@ void DebugPort::Init() {
   
   // Initialize USART.
   USART_InitTypeDef usart_init;
-  usart_init.USART_BaudRate = 9600;
+  usart_init.USART_BaudRate = baud_rate;
   usart_init.USART_WordLength = USART_WordLength_8b;
   usart_init.USART_StopBits = USART_StopBits_1;
   usart_init.USART_Parity = USART_Parity_No;

@@ -50,8 +50,10 @@ TOOLCHAIN_PATH ?= /usr/local/arm-4.8.3/
 include stmlib/makefile.inc
 
 # Rule for building the firmware update file
+# The encoder imports its own package by name, so the repo root has to be on
+# PYTHONPATH. It is a Python 2 script and needs numpy.
 wav:  $(TARGET_BIN)
-	python stm_audio_bootloader/qpsk/encoder.py \
+	PYTHONPATH=$(CURDIR) python stm_audio_bootloader/qpsk/encoder.py \
 		-t stm32f4 -s 48000 -b 12000 -c 6000 -p 256 \
 		$(TARGET_BIN)
 

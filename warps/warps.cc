@@ -29,10 +29,15 @@
 #include "warps/drivers/system.h"
 #include "warps/drivers/version.h"
 #include "warps/dsp/modulator.h"
+#include "warps/profiler.h"
 #include "warps/settings.h"
 #include "warps/ui.h"
 
 // #define PROFILE_INTERRUPT 1
+
+// PROFILE_CPU is defined in warps/profiler.h -- that is the single switch.
+// When on it also takes over PA9 for the UART, so it is mutually exclusive
+// with PROFILE_INTERRUPT, which drives the same pin as a GPIO.
 
 using namespace warps;
 using namespace stmlib;
@@ -43,6 +48,11 @@ DebugPort debug_port;
 Modulator modulator;
 Settings settings;
 Ui ui;
+#if PROFILE_CPU
+// Main RAM is full; the profiler is debug-only, so it lives in CCM alongside
+// its counters (see profiler.cc).
+Profiler profiler __attribute__((section(".ccmdata")));
+#endif  // PROFILE_CPU
 
 int __errno;
 
@@ -64,9 +74,18 @@ void FillBuffer(Codec::Frame* input, Codec::Frame* output, size_t n) {
 #ifdef PROFILE_INTERRUPT
   TIC
 #endif  // PROFILE_INTERRUPT
+#if PROFILE_CPU
+  profiler.BeginBlock();
+#endif  // PROFILE_CPU
   cv_scaler.DetectAudioNormalization(input, n);  // 0.8% CPU
   cv_scaler.Read(modulator.mutable_parameters());
+#if PROFILE_CPU
+  profiler.BeginModulator();
+#endif  // PROFILE_CPU
   modulator.Process((ShortFrame*)input, (ShortFrame*)output, n);
+#if PROFILE_CPU
+  profiler.EndModulator();
+#endif  // PROFILE_CPU
   ui.Poll();
   if (settings.freshly_baked()) {
     if (debug_port.readable()) {
@@ -75,6 +94,9 @@ void FillBuffer(Codec::Frame* input, Codec::Frame* output, size_t n) {
       debug_port.Overwrite(response);
     }
   }
+#if PROFILE_CPU
+  profiler.EndBlock(modulator.feature_mode());
+#endif  // PROFILE_CPU
 #ifdef PROFILE_INTERRUPT
   TOC
 #endif  // PROFILE_INTERRUPT
@@ -102,6 +124,11 @@ void Init() {
   }
   codec.set_line_input_gain(24);  // Max input level: 16Vpp.
   
+#if PROFILE_CPU
+  // The profiler owns the debug port regardless of factory-test state.
+  debug_port.Init(115200);
+  profiler.Init(&debug_port, 96000, 60);
+#else
   if (settings.freshly_baked()) {
 #ifdef PROFILE_INTERRUPT
     DebugPin::Init();
@@ -109,11 +136,15 @@ void Init() {
     debug_port.Init();
 #endif  // PROFILE_INTERRUPT
   }
+#endif  // PROFILE_CPU
 }
 
 int main(void) {
   Init();
   while (1) {
     ui.DoEvents();
+#if PROFILE_CPU
+    profiler.DoEvents();
+#endif  // PROFILE_CPU
   }
 }
