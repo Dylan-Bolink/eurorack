@@ -62,12 +62,48 @@ void PatternGenerator::Init() {
   henri_ = false;
 }
 
+// Bank 3 step weight. Density (applied downstream as a threshold) reveals steps
+// in weight order, so this defines the rhythm. Equal weights within a metric
+// tier give the clean 1,2,4,8,16,32 division progression.
+static inline uint8_t DivisionWeight(uint8_t step) {
+  uint8_t tier;                                  // metric strength, 0 = strongest
+  if (step == 0)            tier = 0;            // downbeat        -> 1/32
+  else if (step % 16 == 0)  tier = 1;            // half            -> 2/32
+  else if (step % 8 == 0)   tier = 2;            // quarters        -> 4/32
+  else if (step % 4 == 0)   tier = 3;            // eighths         -> 8/32
+  else if (step % 2 == 0)   tier = 4;            // sixteenths      -> 16/32
+  else                      tier = 5;            // off-grid 32nds  -> 32/32
+  return 255 - tier * 40;                        // 255,215,175,135,95,55
+}
+
+// Bank 3, triplet side: the same reveal-by-threshold idea on a ternary grid
+// (quarter/8th/16th-note triplets approximated on the 32-step bar: thirds at
+// 0/11/21, sixths add 5/16/27, twelfths add 3/8/13/19/24/29). The straight
+// 16th positions fill in above the off-grid leftovers so high densities stay
+// busy rather than gapped.
+static const uint8_t kTripletWeight[32] = {
+  255,  55,  95, 135,  95, 175,  95,  55,   // 0: downbeat, 3/5: 12th/6th
+  135,  55,  95, 215,  95, 135,  95,  55,   // 11: triplet quarter
+  175,  55,  95, 135,  95, 215,  95,  55,   // 16: 6th, 21: triplet quarter
+  135,  55,  95, 175,  95, 135,  95,  55,   // 24: 12th, 27: 6th
+};
+
 uint8_t PatternGenerator::ReadDrumMap(
     uint8_t step,
     uint8_t instrument,
     uint8_t x,
     uint8_t y) {
   uint8_t i, j;
+
+  if (bank_ == 3) {
+    // Map Y: per-channel rotation spreads the three dividers in phase
+    // (kick anchored). Map X morphs the metric grid itself — straight
+    // binary divisions at CCW crossfading into a triplet grid at CW —
+    // so every knob position changes the rhythm on every channel.
+    uint8_t rot = instrument * ((static_cast<uint16_t>(y) * 8) >> 8);
+    uint8_t s = (step + 32 - rot) & 31;
+    return U8Mix(DivisionWeight(s), kTripletWeight[s], x);
+  }
 
   if (henri_) {
     i = static_cast<uint8_t>(static_cast<uint16_t>(x) * 3 / 255);

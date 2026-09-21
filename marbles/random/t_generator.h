@@ -181,6 +181,11 @@ class TGenerator {
     grids_accent_threshold_ = threshold;
   }
 
+  // Drum fill "Roll": force a snare hit on every step, bypassing the map.
+  void set_grids_snare_roll(bool roll) {
+    grids_snare_roll_ = roll;
+  }
+
   // 0=kick 1=hh 2=snare 3=all
   void set_grids_accent_mode(uint8_t mode) {
     grids_accent_mode_ = mode;
@@ -204,6 +209,19 @@ class TGenerator {
 
   void set_grids_sync_playheads(bool sync) {
     grids_sync_playheads_ = sync;
+  }
+
+  // When acid mode drives the X section, the master ramp must stay a clean
+  // continuous phase so the acid sequencer clocks off the master clock rather
+  // than the (hi-hat-gated) drum ramp.
+  void set_acid_active(bool active) {
+    acid_active_ = active;
+  }
+
+  // Current drum-pattern step, so the acid half-time divider can phase-lock to
+  // the Grids grid.
+  uint8_t grids_step() const {
+    return static_cast<uint8_t>(drum_pattern_step_);
   }
 
   void set_grids_loop_start_at_one(bool at_one) {
@@ -314,6 +332,7 @@ class TGenerator {
   float grids_swing_latched_;
   uint8_t grids_accent_threshold_;
   uint8_t grids_accent_mode_;  // 0=kick, 1=hh, 2=snare, 3=all
+  bool grids_snare_roll_;
   bool grids_interpolation_;
   float accent_velocity_;
   float random_accent_voltage_;
@@ -331,6 +350,7 @@ class TGenerator {
   SlaveRamp accent_slave_ramp_;
 
   bool grids_sync_playheads_;
+  bool acid_active_;
   uint8_t grids_loop_start_at_one_;
   uint8_t grids_free_step_;  // shadow counter for sync playheads
   uint8_t grids_part_perturbation_[3];  // per-instrument chaos, set at step 0

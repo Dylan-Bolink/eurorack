@@ -248,6 +248,12 @@ void Process(IOBuffer::Block* block, size_t size) {
   const State& state = settings.state();
 
   bool grids_mode = (state.t_model == T_GENERATOR_MODEL_GRIDS);
+  // Envelope mode ignores the X register modes entirely (see the X-section
+  // plumbing); routing decisions must agree with that, or a leftover
+  // Transpose/External setting silently deadens the Spread jack while the
+  // X Ext LED claims register modes are off.
+  bool x_register_active = state.x_register_mode != X_REGISTER_MODE_OFF
+      && state.x_control_mode != CONTROL_MODE_ENVELOPE;
   float deja_vu = parameters[ADC_CHANNEL_DEJA_VU_AMOUNT];
 
   uint8_t t_deja_vu_state = state.t_deja_vu;
@@ -361,6 +367,8 @@ void Process(IOBuffer::Block* block, size_t size) {
     t_generator.set_grids_henri(state.grids_henri);
     t_generator.set_grids_sync_playheads(state.grids_sync_playheads);
     t_generator.set_grids_loop_start_at_one(state.grids_loop_start_at_one);
+    // Acid clocks off the clean master ramp, not the hi-hat-gated one.
+    t_generator.set_acid_active(state.x_control_mode == CONTROL_MODE_ACID);
 
     float groove_raw = static_cast<float>(state.grids_groove_offset) / 255.0f;
     float groove = (groove_raw - 0.5f) * 2.0f;
@@ -392,7 +400,7 @@ void Process(IOBuffer::Block* block, size_t size) {
         final_y += cv_reader.channel(ADC_CHANNEL_T_JITTER).cv();
         CONSTRAIN(final_y, 0.0f, 1.0f);
       }
-      if (settings.grids_chaos_cv_swap() == 1 && state.x_register_mode == X_REGISTER_MODE_OFF) {
+      if (settings.grids_chaos_cv_swap() == 1 && !x_register_active) {
         final_chaos += cv_reader.channel(ADC_CHANNEL_X_SPREAD).cv();
         CONSTRAIN(final_chaos, -1.0f, 1.0f);
       } else if (settings.grids_chaos_cv_swap() == 2) {
@@ -425,7 +433,7 @@ void Process(IOBuffer::Block* block, size_t size) {
       }
 
       // Chaos CV: 0=off, 1=spread, 2=rate
-      if (settings.grids_chaos_cv_swap() == 1 && state.x_register_mode == X_REGISTER_MODE_OFF) {
+      if (settings.grids_chaos_cv_swap() == 1 && !x_register_active) {
         final_chaos += cv_reader.channel(ADC_CHANNEL_X_SPREAD).cv();
         CONSTRAIN(final_chaos, -1.0f, 1.0f);
       } else if (settings.grids_chaos_cv_swap() == 2) {
@@ -434,8 +442,6 @@ void Process(IOBuffer::Block* block, size_t size) {
       }
     }
     if (fabsf(final_chaos) < kDeadband) final_chaos = 0.0f;
-
-    t_generator.set_grids_coordinates(final_x, final_y, final_chaos);
 
     float hh_density = static_cast<float>(state.grids_hh_density) / 255.0f;
     if (settings.grids_chaos_cv_swap() != 2) {
@@ -457,9 +463,64 @@ void Process(IOBuffer::Block* block, size_t size) {
         snare_density = parameters[ADC_CHANNEL_T_JITTER];
     }
 
+    // Momentary drum fill (T Range held): a randomly-chosen flavor overrides
+    // the drum-map coordinates / densities while active, then snaps back.
+    bool snare_roll = false;
+    if (ui.drum_fill_active()) {
+      switch (ui.drum_fill_flavor()) {
+        case 0: {  // Build: staggered, arrangement-style ramp over the hold.
+          // Hats densify first, snare joins mid-hold, kick + chaos arrive
+          // last. Moderate peaks: a climax, not a wall of triggers. Voices
+          // already set above their peak are left alone (never pulled down).
+          float ramp = ui.drum_fill_ramp();
+          float hh_ramp = ramp * 2.0f;
+          float snare_ramp = ramp * 2.0f - 0.5f;
+          float kick_ramp = ramp * 2.0f - 1.0f;
+          CONSTRAIN(hh_ramp, 0.0f, 1.0f);
+          CONSTRAIN(snare_ramp, 0.0f, 1.0f);
+          CONSTRAIN(kick_ramp, 0.0f, 1.0f);
+          if (hh_density < 0.85f) {
+            hh_density += (0.85f - hh_density) * hh_ramp;
+          }
+          if (snare_density < 0.8f) {
+            snare_density += (0.8f - snare_density) * snare_ramp;
+          }
+          if (kick_density < 0.75f) {
+            kick_density += (0.75f - kick_density) * kick_ramp;
+          }
+          if (final_chaos < 0.45f) {
+            final_chaos += (0.45f - final_chaos) * kick_ramp;
+          }
+          break;
+        }
+        case 1:  // Roll: snare on every step, kick/hats pulled back.
+          snare_roll = true;
+          snare_density = 1.0f;
+          kick_density = 0.3f;
+          hh_density = 0.25f;
+          final_chaos = 0.0f;
+          break;
+        default: {  // Scatter: jump to another map spot, moderately busy.
+          // Random offset of 0.25..0.75 (wrapped) instead of an absolute
+          // target, so the fill always lands a real distance away and never
+          // degenerates into "same groove" when the target is nearby.
+          final_x += 0.25f + 0.5f * static_cast<float>(ui.drum_fill_x()) / 255.0f;
+          if (final_x >= 1.0f) final_x -= 1.0f;
+          final_y += 0.25f + 0.5f * static_cast<float>(ui.drum_fill_y()) / 255.0f;
+          if (final_y >= 1.0f) final_y -= 1.0f;
+          final_chaos = 0.0f;
+          kick_density = snare_density = hh_density = 0.7f;
+          break;
+        }
+      }
+    }
+    t_generator.set_grids_snare_roll(snare_roll);
+
+    t_generator.set_grids_coordinates(final_x, final_y, final_chaos);
+
     t_generator.set_grids_densities(
-      kick_density, 
-      snare_density, 
+      kick_density,
+      snare_density,
       hh_density
     );
 
@@ -498,8 +559,10 @@ void Process(IOBuffer::Block* block, size_t size) {
   float note_cv = 0.5f * (note_cv_1 + note_cv_2);
   float u = note_filter.Process(0.5f * (note_cv + 1.0f));
 
-  // V/Oct correction curve
-  if (state.x_register_mode == X_REGISTER_MODE_VOCT_OFFSET) {
+  // V/Oct correction curve. Skipped while recording a scale: the recorded
+  // voltages must not depend on whether Transpose happens to be enabled.
+  if (state.x_register_mode == X_REGISTER_MODE_VOCT_OFFSET
+      && !ui.recording_scale()) {
     static const float kVoctCorrectionTable[] = {
       0.015f,  // u=0.000 -5.0V
       0.136f,  // u=0.125 -3.75V
@@ -511,6 +574,9 @@ void Process(IOBuffer::Block* block, size_t size) {
       0.861f,  // u=0.875 +3.75V
       0.982f,  // u=1.000 +5.0V
     };
+    // The 9-entry table spans [0, 1]; clamp so a CV at or beyond +5V can't
+    // interpolate past the last entry (out-of-bounds flash read).
+    CONSTRAIN(u, 0.0f, 0.999995f);
     u = Interpolate(kVoctCorrectionTable, u, 8.0f);
   }
 
@@ -540,10 +606,20 @@ void Process(IOBuffer::Block* block, size_t size) {
   } else {
     x.control_mode = ControlMode(state.x_control_mode);
     x.voltage_range = VoltageRange(state.x_range % 3);
+    x.envelope_retrigger = state.x_envelope_retrigger;
+    x.acid_half_time = grids_mode;
     bool is_register = (state.x_register_mode == X_REGISTER_MODE_REGISTER);
     bool is_voct_offset = (state.x_register_mode == X_REGISTER_MODE_VOCT_OFFSET);
+    // Register modes are meaningless in envelope mode (the X trio carries
+    // envelopes, not pitches or shift-register data); ignore a leftover
+    // setting so it can't halve the Spread CV response or shift outputs.
+    if (state.x_control_mode == CONTROL_MODE_ENVELOPE) {
+      is_register = is_voct_offset = false;
+    }
     x.register_mode = is_register;
-    x.use_shift_register = is_register || is_voct_offset;
+    // Transpose is a global offset applied at the DAC stage; the three X
+    // outputs stay independent (shift-register replay is External only).
+    x.use_shift_register = is_register;
     x.register_value = u;
     cv_reader.set_attenuverter(
         ADC_CHANNEL_X_SPREAD, (is_register || is_voct_offset) ? 0.5f : 1.0f);
@@ -552,7 +628,10 @@ void Process(IOBuffer::Block* block, size_t size) {
       // Swapped: X params from stored alt fields + CV from jacks
       // CV goes to its normal destination (X params) unless rerouted by CV swap
       x.spread = static_cast<float>(state.x_spread_alt) / 255.0f;
-      if (!is_voct_offset && settings.grids_chaos_cv_swap() != 1) {
+      // In External mode the Spread jack carries register data, and in
+      // Transpose mode the V/Oct offset — neither may leak into spread.
+      if (!is_register && !is_voct_offset
+          && settings.grids_chaos_cv_swap() != 1) {
         x.spread += cv_reader.channel(ADC_CHANNEL_X_SPREAD).cv();
         CONSTRAIN(x.spread, 0.0f, 1.0f);
       }
@@ -569,21 +648,23 @@ void Process(IOBuffer::Block* block, size_t size) {
         CONSTRAIN(x.steps, 0.0f, 1.0f);
       }
     } else {
-      // Normal: X params from ADC (with CV swap isolation)
+      // Normal: X params from ADC (with CV swap isolation). Where the CV
+      // jack is repurposed, read the stored pot (lock/catch-up aware), not
+      // the live one, so shift-combo edits don't sweep the parameter.
       if (is_voct_offset || (grids_mode && settings.grids_chaos_cv_swap() == 1)) {
-        x.spread = cv_reader.channel(ADC_CHANNEL_X_SPREAD).unscaled_pot();
+        x.spread = cv_reader.channel(ADC_CHANNEL_X_SPREAD).unscaled_stored_pot();
       } else {
         x.spread = parameters[ADC_CHANNEL_X_SPREAD];
       }
 
       if (grids_mode && settings.grids_y_cv_swap() == 1) {
-        x.bias = cv_reader.channel(ADC_CHANNEL_X_BIAS).unscaled_pot();
+        x.bias = cv_reader.channel(ADC_CHANNEL_X_BIAS).unscaled_stored_pot();
       } else {
         x.bias = parameters[ADC_CHANNEL_X_BIAS];
       }
 
       if (grids_mode && settings.grids_x_cv_swap() == 1) {
-        x.steps = cv_reader.channel(ADC_CHANNEL_X_STEPS).unscaled_pot();
+        x.steps = cv_reader.channel(ADC_CHANNEL_X_STEPS).unscaled_stored_pot();
       } else {
         x.steps = parameters[ADC_CHANNEL_X_STEPS];
       }
@@ -599,6 +680,8 @@ void Process(IOBuffer::Block* block, size_t size) {
   
     y.control_mode = CONTROL_MODE_IDENTICAL;
     y.voltage_range = VoltageRange(state.y_range);
+    y.envelope_retrigger = 0;
+    y.acid_half_time = false;
     y.register_mode = false;
     y.use_shift_register = false;
     y.register_value = 0.0f;
@@ -618,13 +701,24 @@ void Process(IOBuffer::Block* block, size_t size) {
       settings.set_dirty_scale_index(-1);
     }
     
-    y.scale_index = x.scale_index = state.x_scale;
+    // x_scale == kNumScales is the acid chromatic sentinel; clamp it to a
+    // valid scale for the quantizer (acid bypasses it via x.chromatic).
+    int scale_idx = state.x_scale >= kNumScales ? 0 : state.x_scale;
+    y.scale_index = x.scale_index = scale_idx;
+    x.chromatic = (state.x_scale >= kNumScales);
+    x.acid_fill_active = ui.acid_fill_active();
+    x.acid_fill_flavor = ui.acid_fill_flavor();
     
     bool x_reset_cv_available = !(grids_mode && settings.grids_x_cv_swap() == 1);
     bool x_section_reset = (settings.explicit_reset() & 2) && x_reset_cv_available &&
       hidden_gates[ADC_CHANNEL_X_STEPS] & GATE_FLAG_RISING;
     if (xy_clock_source != CLOCK_SOURCE_EXTERNAL && (settings.explicit_reset() & 2)) {
       x_section_reset |= t_section_reset;
+    }
+
+    // Phase-lock the acid half-time divider to the Grids drum grid.
+    if (grids_mode) {
+      xy_generator.set_acid_align_step(t_generator.grids_step());
     }
 
     xy_generator.Process(
@@ -643,8 +737,17 @@ void Process(IOBuffer::Block* block, size_t size) {
 
   float voct_offset = 0.0f;
   if (state.x_register_mode == X_REGISTER_MODE_VOCT_OFFSET
+      && state.x_control_mode != CONTROL_MODE_ENVELOPE  // envelopes, not pitches
       && !test_adc_noise && !ui.recording_scale()) {
     voct_offset = (u - 0.5f) * 10.0f;
+  }
+
+  // In acid mode X2 carries gates and X3 an envelope/velocity signal;
+  // transposition only makes sense on the X1 pitch output.
+  float voct_offset_23 = voct_offset;
+  if (state.x_control_mode == CONTROL_MODE_ACID
+      && !test_adc_noise && !ui.recording_scale()) {
+    voct_offset_23 = 0.0f;
   }
 
   for (size_t i = 0; i < size; ++i) {
@@ -654,8 +757,8 @@ void Process(IOBuffer::Block* block, size_t size) {
     float val_y  = *v++;
 
     block->cv_output[1][i] = DacCode(1, val_x1 + voct_offset); // X1
-    block->cv_output[2][i] = DacCode(2, val_x2 + voct_offset); // X2
-    block->cv_output[3][i] = DacCode(3, val_x3 + voct_offset); // X3
+    block->cv_output[2][i] = DacCode(2, val_x2 + voct_offset_23); // X2
+    block->cv_output[3][i] = DacCode(3, val_x3 + voct_offset_23); // X3
     
     if (grids_mode) {
       float accent_voltage = 0.0f;
