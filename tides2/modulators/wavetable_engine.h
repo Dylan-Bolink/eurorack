@@ -82,17 +82,17 @@ class WavetableEngine {
 
   inline float fold(float value, float fold_amount, bool bipolar) {
     if (bipolar) {
+      float index = 0.5f + value * (0.03f + 0.46f * fold_amount);
+      CONSTRAIN(index, 0.0f, 1.0f);
       float folded = fold_amount > 0.0f ? stmlib::Interpolate(
-          lut_bipolar_fold,
-          0.5f + value * (0.03f + 0.46f * fold_amount),
-          1024.0f) : 0.0f;
+          lut_bipolar_fold, index, 1024.0f) : 0.0f;
       return 5.0f * (value + (folded - value) * fold_amount);
     } else {
       value = (value + 1.0f) / 2.0f;
+      float index = value * fold_amount;
+      CONSTRAIN(index, 0.0f, 1.0f);
       float folded = fold_amount > 0.0f ? stmlib::Interpolate(
-          lut_unipolar_fold,
-          value * fold_amount,
-          1024.0f) : 0.0f;
+          lut_unipolar_fold, index, 1024.0f) : 0.0f;
       return 8.0f * (value + (folded - value) * fold_amount);
     }
   }
@@ -206,14 +206,18 @@ class WavetableEngine {
   float lp_2_[4];
 
   Differentiator diff_out_;
+  float direct_lp_;
   
   DISALLOW_COPY_AND_ASSIGN(WavetableEngine);
 };
 
+// Also returns the derivative of the interpolant with respect to the table
+// index, which is the original (non-integrated) waveform.
 inline float InterpolateWaveHermite(
     const int16_t* table,
     int32_t index_integral,
-    float index_fractional) {
+    float index_fractional,
+    float* derivative) {
   const float xm1 = table[index_integral];
   const float x0 = table[index_integral + 1];
   const float x1 = table[index_integral + 2];
@@ -224,7 +228,18 @@ inline float InterpolateWaveHermite(
   const float a = w + v + (x2 - x0) * 0.5f;
   const float b_neg = w + a;
   const float f = index_fractional;
+  *derivative = (3.0f * a * f - 2.0f * b_neg) * f + c;
   return (((a * f) - b_neg) * f + c) * f + x0;
+}
+
+inline float InterpolateWaveHermite(
+    const int16_t* table,
+    int32_t index_integral,
+    float index_fractional) {
+  // The unused derivative is optimized away once inlined.
+  float unused;
+  return InterpolateWaveHermite(
+      table, index_integral, index_fractional, &unused);
 }
 
 }
