@@ -56,8 +56,14 @@ void WavetableEngine::Init() {
   phases_[1] = 0.0f;
   next_sample_tri_ = 0.0f;
   diff_out_.Init();
+  direct_lp_ = 0.0f;
   fill(&lp_1_[0], &lp_1_[4], 0.0f);
   fill(&lp_2_[0], &lp_2_[4], 0.0f);
+}
+
+inline const int16_t* Wave(int x, int y, int z) {
+  const int idx = x + y * 8;
+  return wav_integrated_waves + (z * 64 + idx) * (table_size + 4);
 }
 
 inline float ReadWave(
@@ -66,12 +72,48 @@ inline float ReadWave(
   int z,
   int phase_integral,
   float phase_fractional) {
-  const int idx = x + y * 8;
   return InterpolateWaveHermite(
-      wav_integrated_waves + (z * 64 + idx) * (table_size + 4),
-      phase_integral,
-      phase_fractional);
+      Wave(x, y, z), phase_integral, phase_fractional);
 }
+
+inline float ReadWave(
+  int x,
+  int y,
+  int z,
+  int phase_integral,
+  float phase_fractional,
+  float* derivative) {
+  return InterpolateWaveHermite(
+      Wave(x, y, z), phase_integral, phase_fractional, derivative);
+}
+
+// Corners ordered x0y0z0, x1y0z0, x0y1z0, x1y1z0, x0y0z1, x1y0z1, x0y1z1,
+// x1y1z1.
+inline float Trilinear(
+    const float* c,
+    float x_fractional,
+    float y_fractional,
+    float z_fractional) {
+  float xy0z0 = c[0] + (c[1] - c[0]) * x_fractional;
+  float xy1z0 = c[2] + (c[3] - c[2]) * x_fractional;
+  float xyz0 = xy0z0 + (xy1z0 - xy0z0) * y_fractional;
+  float xy0z1 = c[4] + (c[5] - c[4]) * x_fractional;
+  float xy1z1 = c[6] + (c[7] - c[6]) * x_fractional;
+  float xyz1 = xy0z1 + (xy1z1 - xy0z1) * y_fractional;
+  return xyz0 + (xyz1 - xyz0) * z_fractional;
+}
+
+// Below kDifferentiatorMinF0, differentiating the integrated wavetable loses
+// precision: the per-sample change drops below float/int16 resolution while
+// the 1 / f0 gain keeps growing. Down there the analytic derivative of the
+// Hermite interpolant is read directly (aliasing is not a concern), with a
+// crossfade between the two methods from kDirectReadMaxF0 up.
+//
+// This engine runs at half the sample rate (the SLOPE_PHASE output mode is
+// half_speed in tides.cc), so f0 is normalized to kSampleRate / 2.
+const float kEngineSampleRate = kSampleRate * 0.5f;
+const float kDirectReadMaxF0 = 50.0f / kEngineSampleRate;
+const float kDifferentiatorMinF0 = 100.0f / kEngineSampleRate;
 
 void WavetableEngine::Render(
     const Parameters& parameters,
@@ -126,7 +168,6 @@ void WavetableEngine::Render(
       reset = true;
     }
     
-    const float gain = (1.0f / (f0 * 131072.0f)) * (0.95f - f0);
     const float cutoff = min(table_size_f * f0, 1.0f);
 
     const float x = x_modulation.Next();
@@ -163,28 +204,53 @@ void WavetableEngine::Render(
       z1 = 3;
     }
 
-    float x0y0z0 = ReadWave(x0, y0, z0, p_integral, p_fractional);
-    float x1y0z0 = ReadWave(x1, y0, z0, p_integral, p_fractional);
-    float xy0z0 = x0y0z0 + (x1y0z0 - x0y0z0) * x_fractional;
+    float corners[8];
+    float mix;
+    if (f0 >= kDifferentiatorMinF0) {
+      corners[0] = ReadWave(x0, y0, z0, p_integral, p_fractional);
+      corners[1] = ReadWave(x1, y0, z0, p_integral, p_fractional);
+      corners[2] = ReadWave(x0, y1, z0, p_integral, p_fractional);
+      corners[3] = ReadWave(x1, y1, z0, p_integral, p_fractional);
+      corners[4] = ReadWave(x0, y0, z1, p_integral, p_fractional);
+      corners[5] = ReadWave(x1, y0, z1, p_integral, p_fractional);
+      corners[6] = ReadWave(x0, y1, z1, p_integral, p_fractional);
+      corners[7] = ReadWave(x1, y1, z1, p_integral, p_fractional);
+      mix = Trilinear(corners, x_fractional, y_fractional, z_fractional);
+      const float gain = (1.0f / (f0 * 131072.0f)) * (0.95f - f0);
+      mix = diff_out_.Process(cutoff, mix) * gain;
+    } else {
+      float derivatives[8];
+      corners[0] = ReadWave(x0, y0, z0, p_integral, p_fractional, &derivatives[0]);
+      corners[1] = ReadWave(x1, y0, z0, p_integral, p_fractional, &derivatives[1]);
+      corners[2] = ReadWave(x0, y1, z0, p_integral, p_fractional, &derivatives[2]);
+      corners[3] = ReadWave(x1, y1, z0, p_integral, p_fractional, &derivatives[3]);
+      corners[4] = ReadWave(x0, y0, z1, p_integral, p_fractional, &derivatives[4]);
+      corners[5] = ReadWave(x1, y0, z1, p_integral, p_fractional, &derivatives[5]);
+      corners[6] = ReadWave(x0, y1, z1, p_integral, p_fractional, &derivatives[6]);
+      corners[7] = ReadWave(x1, y1, z1, p_integral, p_fractional, &derivatives[7]);
 
-    float x0y1z0 = ReadWave(x0, y1, z0, p_integral, p_fractional);
-    float x1y1z0 = ReadWave(x1, y1, z0, p_integral, p_fractional);
-    float xy1z0 = x0y1z0 + (x1y1z0 - x0y1z0) * x_fractional;
+      // Keep the differentiator running so the crossfade has no transient.
+      float differentiated = diff_out_.Process(
+          cutoff,
+          Trilinear(corners, x_fractional, y_fractional, z_fractional));
 
-    float xyz0 = xy0z0 + (xy1z0 - xy0z0) * y_fractional;
+      // d(mix)/d(sample) = derivative * table_size * f0, times the gain.
+      // Same one-pole lowpass as the differentiator, so both paths match.
+      float direct = Trilinear(
+          derivatives, x_fractional, y_fractional, z_fractional) *
+          (table_size_f / 131072.0f) * (0.95f - f0);
+      ONE_POLE(direct_lp_, direct, cutoff);
+      mix = direct_lp_;
 
-    float x0y0z1 = ReadWave(x0, y0, z1, p_integral, p_fractional);
-    float x1y0z1 = ReadWave(x1, y0, z1, p_integral, p_fractional);
-    float xy0z1 = x0y0z1 + (x1y0z1 - x0y0z1) * x_fractional;
-
-    float x0y1z1 = ReadWave(x0, y1, z1, p_integral, p_fractional);
-    float x1y1z1 = ReadWave(x1, y1, z1, p_integral, p_fractional);
-    float xy1z1 = x0y1z1 + (x1y1z1 - x0y1z1) * x_fractional;
-    
-    float xyz1 = xy0z1 + (xy1z1 - xy0z1) * y_fractional;
-
-    float mix = xyz0 + (xyz1 - xyz0) * z_fractional;
-    mix = diff_out_.Process(cutoff, mix) * gain;
+      // Select rather than lerp: the 1 / f0 gain is inf at f0 = 0 (clocked
+      // with no period yet), and inf * 0 would be NaN.
+      if (f0 > kDirectReadMaxF0) {
+        const float gain = (1.0f / (f0 * 131072.0f)) * (0.95f - f0);
+        const float amount = (f0 - kDirectReadMaxF0) /
+            (kDifferentiatorMinF0 - kDirectReadMaxF0);
+        mix += (differentiated * gain - mix) * amount;
+      }
+    }
     float fold_amount = fold_modulation.Next();
 
     out[index].channel[0] = fold(mix, fold_amount, true);
